@@ -7,20 +7,21 @@ Horizon API client for device communication.
 
 import asyncio
 import logging
+import ssl
 from typing import Any, Optional
 
+import certifi
 from lghorizon import LGHorizonApi, LGHorizonBox
 
 _LOG = logging.getLogger(__name__)
 
-# Map provider names to country codes for lghorizon
 PROVIDER_TO_COUNTRY = {
-    "Ziggo": "nl",  # Netherlands
-    "VirginMedia": "gb",  # United Kingdom
-    "Telenet": "be",  # Belgium
-    "UPC": "ch",  # Switzerland
-    "Sunrise": "ch",  # Switzerland
-    "Magenta": "at",  # Austria
+    "Ziggo": "nl",
+    "VirginMedia": "gb",
+    "Telenet": "be",
+    "UPC": "ch",
+    "Sunrise": "ch",
+    "Magenta": "at",
 }
 
 
@@ -41,10 +42,21 @@ class HorizonClient:
         self._api: Optional[LGHorizonApi] = None
         self._connected = False
         
-        # Map provider to country code
         self.country_code = PROVIDER_TO_COUNTRY.get(provider, "nl")
         
         _LOG.info(f"Horizon client initialized: provider={provider}, country_code={self.country_code}")
+
+    def _create_ssl_context(self) -> ssl.SSLContext:
+        """
+        Create SSL context with certifi certificate bundle.
+
+        :return: Configured SSL context
+        """
+        context = ssl.create_default_context(cafile=certifi.where())
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+        _LOG.debug(f"SSL context created with CA bundle: {certifi.where()}")
+        return context
 
     async def connect(self) -> bool:
         """
@@ -56,29 +68,30 @@ class HorizonClient:
             _LOG.info("Connecting to Horizon API: provider=%s, username=%s", 
                      self.provider, self.username)
             
-            # Check if using refresh token (GB, CH, BE)
             country = self.country_code[0:2]
             if country in ("gb", "ch", "be"):
-                # Password is actually refresh_token for these countries
                 _LOG.info("Using refresh token authentication for %s", country.upper())
                 self._api = LGHorizonApi(
                     username=self.username,
-                    password="",  # Not used for refresh token
+                    password="",
                     country_code=self.country_code,
                     refresh_token=self.password,
                 )
             else:
-                # Standard username/password authentication
                 self._api = LGHorizonApi(
                     username=self.username,
                     password=self.password,
                     country_code=self.country_code,
                 )
             
-            # Connect (this does authorization + MQTT connection)
+            ssl_context = self._create_ssl_context()
+            
+            if hasattr(self._api, '_mqtt_client') and self._api._mqtt_client:
+                self._api._mqtt_client.tls_set_context(ssl_context)
+                _LOG.info("SSL context applied to MQTT client")
+            
             await asyncio.to_thread(self._api.connect)
             
-            # Wait for devices to register
             await asyncio.sleep(3)
             
             self._connected = True
@@ -115,7 +128,6 @@ class HorizonClient:
         box: LGHorizonBox
         for device_id, box in self._api.settop_boxes.items():
             try:
-                # Use correct attribute name from discovery
                 device_name = getattr(box, "device_friendly_name", device_id)
                 
                 devices.append({
@@ -156,7 +168,6 @@ class HorizonClient:
                 _LOG.warning(f"Device not found: {device_id}")
                 return False
             
-            # Use lghorizon's send_key_to_box method
             await asyncio.to_thread(box.send_key_to_box, key)
             _LOG.debug("Sent key to %s: %s", device_id, key)
             return True
@@ -168,11 +179,7 @@ class HorizonClient:
     async def set_channel(self, device_id: str, channel_number: str) -> bool:
         """
         Set channel on device using digit key sequence.
-        
-        Based on Home Assistant integration pattern:
-        - Send individual digit keys
-        - Works like physical remote channel entry
-        
+
         :param device_id: Device identifier
         :param channel_number: Channel number as string (e.g., "103", "401")
         :return: True if successful, False otherwise
@@ -183,7 +190,6 @@ class HorizonClient:
                 _LOG.warning(f"Device not found: {device_id}")
                 return False
             
-            # Convert to string if needed
             channel_str = str(channel_number).strip()
             
             if not channel_str.isdigit():
@@ -192,12 +198,10 @@ class HorizonClient:
             
             _LOG.info(f"Setting channel to {channel_str} on {device_id}")
             
-            # Send each digit as a separate key press
             for digit in channel_str:
                 await asyncio.to_thread(box.send_key_to_box, f"Digit{digit}")
-                await asyncio.sleep(0.3)  # Brief delay between digits
+                await asyncio.sleep(0.3)
             
-            # Press Select to confirm channel change
             await asyncio.sleep(0.5)
             await asyncio.to_thread(box.send_key_to_box, "Select")
             
@@ -230,9 +234,6 @@ class HorizonClient:
     async def power_off(self, device_id: str) -> bool:
         """
         Power off device (puts in standby mode).
-        
-        Note: Horizon boxes don't truly power off, they go to standby.
-        This is the correct behavior matching the physical remote.
 
         :param device_id: Device identifier
         :return: True if successful
@@ -364,10 +365,6 @@ class HorizonClient:
     async def get_device_state(self, device_id: str) -> dict[str, Any]:
         """
         Get current state of device.
-        
-        States from discovery:
-        - ONLINE_STANDBY: Box is on but in standby
-        - ONLINE_RUNNING: Box is actively playing
 
         :param device_id: Device identifier
         :return: Device state dict
@@ -377,7 +374,6 @@ class HorizonClient:
             if not box:
                 return {"state": "unavailable"}
             
-            # Get state from lghorizon box object
             state = {
                 "state": box.state,
                 "channel": None,
@@ -385,7 +381,6 @@ class HorizonClient:
                 "media_image": None,
             }
             
-            # Get playing info if available
             if hasattr(box, "playing_info") and box.playing_info:
                 playing_info = box.playing_info
                 state["channel"] = getattr(playing_info, "channel_title", None)
