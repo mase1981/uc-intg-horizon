@@ -1,0 +1,114 @@
+{
+  "driver_id": "horizon",
+  "version": "0.1.0",
+  "min_core_api": "1.0.0",
+  "name": {
+    "en": "LG Horizon Set-Top Box",
+    "de": "LG Horizon Set-Top-Box",
+    "nl": "LG Horizon Settop Box"
+  },
+  "description": {
+    "en": "Control your LG Horizon set-top boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta) with full media player and remote control functionality.",
+    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta) mit vollständiger Media Player- und Fernbedienungsfunktionalität.",
+    "nl": "Bedien uw LG Horizon settop boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta) met volledige mediaspeler- en afstandsbedieningsfunctionaliteit."
+  },
+  "developer": {
+    "name": "Meir Miyara",
+    "email": "meir.miyara@gmail.com",
+    "url": "https://github.com/mase1981"
+  },
+  "home_page": "https://github.com/mase1981/uc-intg-horizon",
+  "documentation": "https://github.com/mase1981/uc-intg-horizon/blob/main/README.md",
+  "release_date": "2025-01-19",
+  "icon": "uc:tv",
+  "port": 9091,
+  "setup_data_schema": {
+    "title": {
+      "en": "LG Horizon Setup",
+      "de": "LG Horizon Einrichtung",
+      "nl": "LG Horizon Installatie"
+    },
+    "settings": [
+      {
+        "id": "provider",
+        "label": {
+          "en": "Select Provider",
+          "de": "Anbieter auswählen",
+          "nl": "Selecteer provider"
+        },
+        "field": {
+          "dropdown": {
+            "items": [
+              {
+                "id": "Ziggo",
+                "label": {
+                  "en": "Ziggo (Netherlands)",
+                  "nl": "Ziggo (Nederland)"
+                }
+              },
+              {
+                "id": "VirginMedia",
+                "label": {
+                  "en": "Virgin Media (UK/Ireland)",
+                  "nl": "Virgin Media (VK/Ierland)"
+                }
+              },
+              {
+                "id": "Telenet",
+                "label": {
+                  "en": "Telenet (Belgium)",
+                  "nl": "Telenet (België)"
+                }
+              },
+              {
+                "id": "UPC",
+                "label": {
+                  "en": "UPC (Switzerland)",
+                  "de": "UPC (Schweiz)"
+                }
+              },
+              {
+                "id": "Sunrise",
+                "label": {
+                  "en": "Sunrise (Switzerland)",
+                  "de": "Sunrise (Schweiz)"
+                }
+              },
+              {
+                "id": "Magenta",
+                "label": {
+                  "en": "Magenta (Austria)",
+                  "de": "Magenta (Österreich)"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "username",
+        "label": {
+          "en": "Username / Email",
+          "de": "Benutzername / E-Mail",
+          "nl": "Gebruikersnaam / E-mail"
+        },
+        "field": {
+          "text": {
+            "placeholder": "your.email@example.com"
+          }
+        }
+      },
+      {
+        "id": "password",
+        "label": {
+          "en": "Password (or Refresh Token for BE/GB/CH)",
+          "de": "Passwort (oder Refresh Token für BE/GB/CH)",
+          "nl": "Wachtwoord (of Refresh Token voor BE/GB/CH)"
+        },
+        "field": {
+          "password": {}
+        }
+      }
+    ]
+  }
+}
