@@ -7,6 +7,7 @@ Horizon API client for device communication.
 
 import asyncio
 import logging
+import os
 import ssl
 from typing import Any, Optional
 
@@ -44,19 +45,11 @@ class HorizonClient:
         
         self.country_code = PROVIDER_TO_COUNTRY.get(provider, "nl")
         
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+        
         _LOG.info(f"Horizon client initialized: provider={provider}, country_code={self.country_code}")
-
-    def _create_ssl_context(self) -> ssl.SSLContext:
-        """
-        Create SSL context with certifi certificate bundle.
-
-        :return: Configured SSL context
-        """
-        context = ssl.create_default_context(cafile=certifi.where())
-        context.check_hostname = True
-        context.verify_mode = ssl.CERT_REQUIRED
-        _LOG.debug(f"SSL context created with CA bundle: {certifi.where()}")
-        return context
+        _LOG.info(f"SSL certificate bundle: {certifi.where()}")
 
     async def connect(self) -> bool:
         """
@@ -83,12 +76,6 @@ class HorizonClient:
                     password=self.password,
                     country_code=self.country_code,
                 )
-            
-            ssl_context = self._create_ssl_context()
-            
-            if hasattr(self._api, '_mqtt_client') and self._api._mqtt_client:
-                self._api._mqtt_client.tls_set_context(ssl_context)
-                _LOG.info("SSL context applied to MQTT client")
             
             await asyncio.to_thread(self._api.connect)
             
