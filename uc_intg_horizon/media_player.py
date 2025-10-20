@@ -38,12 +38,13 @@ class HorizonMediaPlayer(MediaPlayer):
         self._client = client
         self._api = api
 
+        # Media player features - all using Commands enum (no Buttons here)
         features = [
             Features.ON_OFF,
             Features.TOGGLE,
             Features.VOLUME_UP_DOWN,
             Features.MUTE_TOGGLE,
-            Features.PLAY_PAUSE,
+            Features.PLAY_PAUSE,  # This is a Features constant - OK
             Features.STOP,
             Features.NEXT,
             Features.PREVIOUS,
@@ -108,7 +109,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     await self._client.power_on(self._device_id)
                     self.attributes[Attributes.STATE] = States.ON
 
-            elif cmd_id == Commands.PLAY_PAUSE:
+            elif cmd_id == Commands.PLAY_PAUSE:  # Commands.PLAY_PAUSE exists - OK
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state == States.PLAYING:
                     await self._client.pause(self._device_id)

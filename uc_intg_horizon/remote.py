@@ -25,7 +25,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonRemote(Remote):
-    """Horizon Remote Control entity implementation with all discovered buttons."""
+    """Horizon Remote Control entity implementation."""
 
     def __init__(
         self,
@@ -46,10 +46,11 @@ class HorizonRemote(Remote):
         self._client = client
         self._api = api
 
+        # Simple commands
         simple_commands = [
             "POWER",
             "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK",
-            "PLAY", "PAUSE", "STOP", "PLAYPAUSE", "RECORD", "REWIND", "FASTFORWARD",
+            "PLAYPAUSE", "STOP", "RECORD", "REWIND", "FASTFORWARD",
             "VOLUME_UP", "VOLUME_DOWN", "MUTE",
             "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE", "INFO",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
@@ -57,6 +58,7 @@ class HorizonRemote(Remote):
             "HOME", "MENU", "OPTIONS", "HELP",
         ]
 
+        # Physical button mappings
         button_mapping = [
             create_btn_mapping(Buttons.POWER, short="POWER"),
             create_btn_mapping(Buttons.HOME, short="HOME"),
@@ -71,7 +73,7 @@ class HorizonRemote(Remote):
             create_btn_mapping(Buttons.MUTE, short="MUTE"),
             create_btn_mapping(Buttons.CHANNEL_UP, short="CHANNEL_UP"),
             create_btn_mapping(Buttons.CHANNEL_DOWN, short="CHANNEL_DOWN"),
-            create_btn_mapping(Buttons.PLAY, short="PLAY"),
+            create_btn_mapping(Buttons.PLAY, short="PLAYPAUSE"),  # Physical play/pause button
             create_btn_mapping(Buttons.STOP, short="STOP"),
             create_btn_mapping(Buttons.RECORD, short="RECORD"),
             create_btn_mapping(Buttons.PREV, short="REWIND"),
@@ -121,8 +123,8 @@ class HorizonRemote(Remote):
         page.add(create_ui_icon("uc:right-arrow", 3, 2, cmd="RIGHT"))
         page.add(create_ui_icon("uc:down-arrow", 1, 3, cmd="DOWN"))
         
-        page.add(create_ui_icon("uc:pause", 0, 4, cmd="PAUSE"))
-        page.add(create_ui_icon("uc:play", 1, 4, cmd="PLAY"))
+        # Use PLAYPAUSE for play/pause toggle button
+        page.add(create_ui_icon("uc:play-pause", 0, 4, size=Size(2, 1), cmd="PLAYPAUSE"))
         page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
         page.add(create_ui_icon("uc:record", 3, 4, cmd="RECORD"))
         
@@ -162,8 +164,7 @@ class HorizonRemote(Remote):
         page.add(create_ui_icon("uc:prev", 0, 1, size=Size(2, 2), cmd="REWIND"))
         page.add(create_ui_icon("uc:next", 2, 1, size=Size(2, 2), cmd="FASTFORWARD"))
         
-        page.add(create_ui_icon("uc:play", 0, 3, size=Size(1, 2), cmd="PLAY"))
-        page.add(create_ui_icon("uc:pause", 1, 3, size=Size(1, 2), cmd="PAUSE"))
+        page.add(create_ui_icon("uc:play-pause", 0, 3, size=Size(2, 2), cmd="PLAYPAUSE"))
         page.add(create_ui_icon("uc:stop", 2, 3, size=Size(1, 2), cmd="STOP"))
         page.add(create_ui_icon("uc:record", 3, 3, size=Size(1, 2), cmd="RECORD"))
         
@@ -248,10 +249,8 @@ class HorizonRemote(Remote):
             "RIGHT": "Right",
             "SELECT": "Select",
             "BACK": "Back",
-            "PLAY": "Play",
-            "PAUSE": "Pause",
+            "PLAYPAUSE": "PlayPause",  # Maps to Horizon's PlayPause command
             "STOP": "Stop",
-            "PLAYPAUSE": "PlayPause",
             "RECORD": "Record",
             "REWIND": "Rewind",
             "FASTFORWARD": "FastForward",
