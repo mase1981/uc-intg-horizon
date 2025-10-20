@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from ucapi import EntityTypes, MediaPlayer, StatusCodes
-from ucapi.media_player import Attributes, Commands, Features, MediaType, States
+from ucapi.media_player import Attributes, Commands, Features, States
 
 from uc_intg_horizon.client import HorizonClient
 
@@ -38,7 +38,6 @@ class HorizonMediaPlayer(MediaPlayer):
         self._client = client
         self._api = api
 
-        # Define features based on discovery results
         features = [
             Features.ON_OFF,
             Features.TOGGLE,
@@ -52,7 +51,7 @@ class HorizonMediaPlayer(MediaPlayer):
             Features.REWIND,
             Features.RECORD,
             Features.CHANNEL_SWITCHER,
-            Features.SELECT_SOURCE,  # For channel selection via play_media
+            Features.SELECT_SOURCE,
             Features.DPAD,
             Features.HOME,
             Features.MENU,
@@ -63,7 +62,6 @@ class HorizonMediaPlayer(MediaPlayer):
             Features.MEDIA_IMAGE_URL,
         ]
 
-        # Initial attributes
         attributes = {
             Attributes.STATE: States.UNAVAILABLE,
             Attributes.MEDIA_TITLE: "",
@@ -71,7 +69,6 @@ class HorizonMediaPlayer(MediaPlayer):
             Attributes.MUTED: False,
         }
 
-        # Initialize parent class
         super().__init__(
             identifier=device_id,
             name=device_name,
@@ -94,7 +91,6 @@ class HorizonMediaPlayer(MediaPlayer):
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
         try:
-            # Power commands
             if cmd_id == Commands.ON:
                 await self._client.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
@@ -112,9 +108,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     await self._client.power_on(self._device_id)
                     self.attributes[Attributes.STATE] = States.ON
 
-            # Playback commands
             elif cmd_id == Commands.PLAY_PAUSE:
-                # Toggle play/pause
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state == States.PLAYING:
                     await self._client.pause(self._device_id)
@@ -142,7 +136,6 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.RECORD:
                 await self._client.record(self._device_id)
 
-            # Volume commands
             elif cmd_id == Commands.VOLUME_UP:
                 await self._client.send_key(self._device_id, "VolumeUp")
                 
@@ -154,7 +147,6 @@ class HorizonMediaPlayer(MediaPlayer):
                 muted = self.attributes.get(Attributes.MUTED, False)
                 self.attributes[Attributes.MUTED] = not muted
 
-            # Navigation commands
             elif cmd_id == Commands.CURSOR_UP:
                 await self._client.send_key(self._device_id, "Up")
                 
@@ -170,7 +162,6 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CURSOR_ENTER:
                 await self._client.send_key(self._device_id, "Select")
 
-            # Menu commands
             elif cmd_id == Commands.HOME:
                 await self._client.send_key(self._device_id, "Home")
                 
@@ -189,17 +180,13 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.BACK:
                 await self._client.send_key(self._device_id, "Back")
 
-            # Channel commands
             elif cmd_id == Commands.CHANNEL_UP:
                 await self._client.next_channel(self._device_id)
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
                 await self._client.previous_channel(self._device_id)
                 
-            # Play media command (for channel selection)
             elif cmd_id == Commands.SELECT_SOURCE:
-                # This is used for channel selection
-                # Params should contain source_id with channel number
                 if params and "source" in params:
                     channel = params["source"]
                     await self._client.set_channel(self._device_id, channel)
@@ -211,7 +198,6 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # Push updated attributes to Remote
             await self.push_update()
             return StatusCodes.OK
 
@@ -222,10 +208,8 @@ class HorizonMediaPlayer(MediaPlayer):
     async def push_update(self) -> None:
         """Push entity state update to Remote."""
         if self._api and self._api.configured_entities.contains(self.id):
-            # Update state from device
             device_state = await self._client.get_device_state(self._device_id)
             
-            # Map Horizon state to UC state
             horizon_state = device_state.get("state", "unavailable")
             
             if horizon_state == "ONLINE_RUNNING":
@@ -237,9 +221,7 @@ class HorizonMediaPlayer(MediaPlayer):
             else:
                 self.attributes[Attributes.STATE] = States.UNAVAILABLE
             
-            # Update media info if available
             if device_state.get("channel"):
-                # Format: "Channel Name - Program Title"
                 channel_name = device_state.get("channel", "")
                 program_title = device_state.get("media_title", "")
                 
@@ -251,7 +233,6 @@ class HorizonMediaPlayer(MediaPlayer):
             if device_state.get("media_image"):
                 self.attributes[Attributes.MEDIA_IMAGE_URL] = device_state["media_image"]
             
-            # Notify UC Remote of changes
             self._api.configured_entities.update_attributes(
                 self.id,
                 self.attributes

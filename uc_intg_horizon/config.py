@@ -8,6 +8,7 @@ Configuration management for Horizon integration.
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 _LOG = logging.getLogger(__name__)
@@ -16,19 +17,25 @@ _LOG = logging.getLogger(__name__)
 class HorizonConfig:
     """Manages Horizon integration configuration with persistence."""
 
-    def __init__(self, config_path: str = "config.json"):
+    def __init__(self, config_path: str = None):
         """
         Initialize configuration manager.
 
         :param config_path: Path to configuration file
         """
-        self.config_path = config_path
+        if config_path is None:
+            data_dir = os.environ.get('UC_CONFIG_HOME', '/data')
+            os.makedirs(data_dir, exist_ok=True)
+            self.config_path = os.path.join(data_dir, 'config.json')
+        else:
+            self.config_path = config_path
+            
         self.provider: str | None = None
         self.username: str | None = None
         self.password: str | None = None
         self.devices: list[dict[str, Any]] = []
         
-        # Load existing configuration if available
+        _LOG.info(f"Configuration path: {self.config_path}")
         self._load_config()
 
     def _load_config(self) -> None:
@@ -67,13 +74,17 @@ class HorizonConfig:
                 "devices": self.devices,
             }
             
+            config_dir = os.path.dirname(self.config_path)
+            if config_dir:
+                os.makedirs(config_dir, exist_ok=True)
+            
             with open(self.config_path, "w", encoding="utf-8") as file:
                 json.dump(config, file, indent=2)
                 
-            _LOG.info("Configuration saved successfully")
+            _LOG.info("Configuration saved successfully to %s", self.config_path)
             return True
         except Exception as e:
-            _LOG.error("Failed to save configuration: %s", e)
+            _LOG.error("Failed to save configuration to %s: %s", self.config_path, e, exc_info=True)
             return False
 
     def reload_from_disk(self) -> None:
@@ -108,7 +119,6 @@ class HorizonConfig:
             "ip_address": ip_address,
         }
         
-        # Check if device already exists
         for i, existing_device in enumerate(self.devices):
             if existing_device.get("device_id") == device_id:
                 self.devices[i] = device
