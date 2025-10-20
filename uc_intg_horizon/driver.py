@@ -74,9 +74,9 @@ async def _initialize_integration():
                 if not await _client.connect():
                     _LOG.error("Failed to connect to Horizon API")
                     return False
-                _LOG.info("âœ" Connected to Horizon API")
+                _LOG.info("Connected to Horizon API")
             else:
-                _LOG.info("âœ" Already connected to Horizon API")
+                _LOG.info("Already connected to Horizon API")
             
             # Step 3: Clear and recreate all entities atomically
             _LOG.info("Creating entities for %d devices...", len(_config.devices))
@@ -88,7 +88,7 @@ async def _initialize_integration():
                 device_id = device["device_id"]
                 device_name = device["name"]
                 
-                _LOG.info("  Creating entities for: %s (%s)", device_name, device_id)
+                _LOG.info("Creating entities for: %s (%s)", device_name, device_id)
                 
                 # Create Media Player
                 media_player = HorizonMediaPlayer(
@@ -114,7 +114,7 @@ async def _initialize_integration():
             # This is CRITICAL per the persistence guide
             _entities_ready = True
             
-            _LOG.info("âœ" Entities ready: %d media players, %d remotes",
+            _LOG.info("Entities ready: %d media players, %d remotes",
                      len(_media_players), len(_remotes))
             _LOG.info("=== Entity Initialization Complete ===")
             
@@ -163,7 +163,7 @@ async def on_connect() -> None:
                 return
     
     # Only set CONNECTED after entities are confirmed ready
-    _LOG.info("âœ" Setting device state to CONNECTED")
+    _LOG.info("Setting device state to CONNECTED")
     await api.set_device_state(DeviceStates.CONNECTED)
 
 
@@ -207,14 +207,14 @@ async def on_subscribe_entities(entity_ids: list[str]):
         for device_id, media_player in _media_players.items():
             if entity_id == media_player.id:
                 await media_player.push_update()
-                _LOG.info("âœ" Subscribed to media player: %s", entity_id)
+                _LOG.info("Subscribed to media player: %s", entity_id)
                 break
         
         # Check remotes
         for device_id, remote in _remotes.items():
             if entity_id == remote.id:
                 await remote.push_update()
-                _LOG.info("âœ" Subscribed to remote: %s", entity_id)
+                _LOG.info("Subscribed to remote: %s", entity_id)
                 break
 
 
