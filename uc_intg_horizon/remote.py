@@ -46,27 +46,17 @@ class HorizonRemote(Remote):
         self._client = client
         self._api = api
 
-        # Define all available commands (from discovery: 42 working commands)
         simple_commands = [
-            # Power
             "POWER",
-            # Navigation
             "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK",
-            # Playback
             "PLAY", "PAUSE", "STOP", "PLAYPAUSE", "RECORD", "REWIND", "FASTFORWARD",
-            # Volume
             "VOLUME_UP", "VOLUME_DOWN", "MUTE",
-            # Channel
             "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE", "INFO",
-            # Numbers
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-            # Colors
             "RED", "GREEN", "YELLOW", "BLUE",
-            # Menu
             "HOME", "MENU", "OPTIONS", "HELP",
         ]
 
-        # Define button mappings for physical remote buttons
         button_mapping = [
             create_btn_mapping(Buttons.POWER, short="POWER"),
             create_btn_mapping(Buttons.HOME, short="HOME"),
@@ -82,7 +72,6 @@ class HorizonRemote(Remote):
             create_btn_mapping(Buttons.CHANNEL_UP, short="CHANNEL_UP"),
             create_btn_mapping(Buttons.CHANNEL_DOWN, short="CHANNEL_DOWN"),
             create_btn_mapping(Buttons.PLAY, short="PLAY"),
-            create_btn_mapping(Buttons.PAUSE, short="PAUSE"),
             create_btn_mapping(Buttons.STOP, short="STOP"),
             create_btn_mapping(Buttons.RECORD, short="RECORD"),
             create_btn_mapping(Buttons.PREV, short="REWIND"),
@@ -93,7 +82,6 @@ class HorizonRemote(Remote):
             create_btn_mapping(Buttons.BLUE, short="BLUE"),
         ]
 
-        # Define UI pages
         ui_pages = [
             self._create_main_page(),
             self._create_numbers_page(),
@@ -101,13 +89,10 @@ class HorizonRemote(Remote):
             self._create_colors_page(),
         ]
 
-        # Features
         features = [Features.ON_OFF, Features.TOGGLE, Features.SEND_CMD]
 
-        # Initial attributes
         attributes = {Attributes.STATE: States.UNAVAILABLE}
 
-        # Initialize parent class
         super().__init__(
             identifier=f"{device_id}_remote",
             name=f"{device_name} Remote",
@@ -125,26 +110,22 @@ class HorizonRemote(Remote):
         """Create main control UI page."""
         page = UiPage("main", "Main Control", grid=Size(4, 6))
         
-        # Row 1: Power and Menu
         page.add(create_ui_icon("uc:power", 0, 0, cmd="POWER"))
         page.add(create_ui_icon("uc:home", 1, 0, cmd="HOME"))
         page.add(create_ui_icon("uc:menu", 2, 0, cmd="MENU"))
         page.add(create_ui_icon("uc:info", 3, 0, cmd="INFO"))
         
-        # Row 2-3: D-Pad
         page.add(create_ui_icon("uc:up-arrow", 1, 1, cmd="UP"))
         page.add(create_ui_icon("uc:left-arrow", 0, 2, cmd="LEFT"))
         page.add(create_ui_icon("uc:select", 1, 2, size=Size(2, 1), cmd="SELECT"))
         page.add(create_ui_icon("uc:right-arrow", 3, 2, cmd="RIGHT"))
         page.add(create_ui_icon("uc:down-arrow", 1, 3, cmd="DOWN"))
         
-        # Row 4: Media Control
         page.add(create_ui_icon("uc:pause", 0, 4, cmd="PAUSE"))
         page.add(create_ui_icon("uc:play", 1, 4, cmd="PLAY"))
         page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
         page.add(create_ui_icon("uc:record", 3, 4, cmd="RECORD"))
         
-        # Row 5: Navigation
         page.add(create_ui_icon("uc:guide", 0, 5, cmd="GUIDE"))
         page.add(create_ui_icon("uc:back", 1, 5, cmd="BACK"))
         page.add(create_ui_icon("uc:menu", 2, 5, cmd="OPTIONS"))
@@ -156,7 +137,6 @@ class HorizonRemote(Remote):
         """Create number pad UI page for channel entry."""
         page = UiPage("numbers", "Channel Numbers", grid=Size(4, 6))
         
-        # Number grid (3x4)
         page.add(create_ui_text("1", 0, 1, cmd="1"))
         page.add(create_ui_text("2", 1, 1, cmd="2"))
         page.add(create_ui_text("3", 2, 1, cmd="3"))
@@ -168,11 +148,9 @@ class HorizonRemote(Remote):
         page.add(create_ui_text("9", 2, 3, cmd="9"))
         page.add(create_ui_text("0", 1, 4, cmd="0"))
         
-        # Channel controls
         page.add(create_ui_icon("uc:up-arrow", 3, 1, cmd="CHANNEL_UP"))
         page.add(create_ui_icon("uc:down-arrow", 3, 2, cmd="CHANNEL_DOWN"))
         
-        # Select button for channel confirmation
         page.add(create_ui_icon("uc:select", 0, 5, size=Size(2, 1), cmd="SELECT"))
         
         return page
@@ -181,17 +159,14 @@ class HorizonRemote(Remote):
         """Create playback control UI page."""
         page = UiPage("playback", "Playback", grid=Size(4, 6))
         
-        # Row 1: Transport controls
         page.add(create_ui_icon("uc:prev", 0, 1, size=Size(2, 2), cmd="REWIND"))
         page.add(create_ui_icon("uc:next", 2, 1, size=Size(2, 2), cmd="FASTFORWARD"))
         
-        # Row 2: Main playback
         page.add(create_ui_icon("uc:play", 0, 3, size=Size(1, 2), cmd="PLAY"))
         page.add(create_ui_icon("uc:pause", 1, 3, size=Size(1, 2), cmd="PAUSE"))
         page.add(create_ui_icon("uc:stop", 2, 3, size=Size(1, 2), cmd="STOP"))
         page.add(create_ui_icon("uc:record", 3, 3, size=Size(1, 2), cmd="RECORD"))
         
-        # Row 3: Volume
         page.add(create_ui_text("VOL+", 0, 5, cmd="VOLUME_UP"))
         page.add(create_ui_text("VOL-", 1, 5, cmd="VOLUME_DOWN"))
         page.add(create_ui_text("MUTE", 2, 5, size=Size(2, 1), cmd="MUTE"))
@@ -202,13 +177,11 @@ class HorizonRemote(Remote):
         """Create color buttons UI page."""
         page = UiPage("colors", "Color Buttons", grid=Size(4, 6))
         
-        # Large color buttons
         page.add(create_ui_text("RED", 0, 1, size=Size(2, 2), cmd="RED"))
         page.add(create_ui_text("GREEN", 2, 1, size=Size(2, 2), cmd="GREEN"))
         page.add(create_ui_text("YELLOW", 0, 3, size=Size(2, 2), cmd="YELLOW"))
         page.add(create_ui_text("BLUE", 2, 3, size=Size(2, 2), cmd="BLUE"))
         
-        # Info button
         page.add(create_ui_icon("uc:info", 1, 5, size=Size(2, 1), cmd="INFO"))
         
         return page
@@ -243,7 +216,6 @@ class HorizonRemote(Remote):
                     self.attributes[Attributes.STATE] = States.ON
                     
             elif cmd_id == Commands.SEND_CMD:
-                # Handle simple command
                 command = params.get("command") if params else None
                 if command:
                     await self._send_simple_command(command)
@@ -255,7 +227,6 @@ class HorizonRemote(Remote):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # Push update
             await self.push_update()
             return StatusCodes.OK
 
@@ -266,25 +237,17 @@ class HorizonRemote(Remote):
     async def _send_simple_command(self, command: str) -> None:
         """
         Send simple command to device.
-        
-        Maps simple command strings to Horizon key names.
 
         :param command: Command string
         """
-        # Map simple commands to Horizon keys (from discovery)
         command_map = {
-            # Power
             "POWER": "Power",
-            
-            # Navigation
             "UP": "Up",
             "DOWN": "Down",
             "LEFT": "Left",
             "RIGHT": "Right",
             "SELECT": "Select",
             "BACK": "Back",
-            
-            # Playback
             "PLAY": "Play",
             "PAUSE": "Pause",
             "STOP": "Stop",
@@ -292,49 +255,36 @@ class HorizonRemote(Remote):
             "RECORD": "Record",
             "REWIND": "Rewind",
             "FASTFORWARD": "FastForward",
-            
-            # Volume
             "VOLUME_UP": "VolumeUp",
             "VOLUME_DOWN": "VolumeDown",
             "MUTE": "Mute",
-            
-            # Channel
             "CHANNEL_UP": "ChannelUp",
             "CHANNEL_DOWN": "ChannelDown",
             "GUIDE": "Guide",
             "INFO": "Info",
-            
-            # Colors
             "RED": "Red",
             "GREEN": "Green",
             "YELLOW": "Yellow",
             "BLUE": "Blue",
-            
-            # Menu
             "HOME": "Home",
             "MENU": "Menu",
             "OPTIONS": "Options",
             "HELP": "Help",
         }
         
-        # Numbers (0-9)
         for i in range(10):
             command_map[str(i)] = f"Digit{i}"
         
-        # Get Horizon key name
         horizon_key = command_map.get(command, command)
         
-        # Send the key
         await self._client.send_key(self._device_id, horizon_key)
         _LOG.debug("Sent simple command: %s -> %s", command, horizon_key)
 
     async def push_update(self) -> None:
         """Push entity state update to Remote."""
         if self._api and self._api.configured_entities.contains(self.id):
-            # Update state from device
             device_state = await self._client.get_device_state(self._device_id)
             
-            # Map Horizon state to UC state
             horizon_state = device_state.get("state", "unavailable")
             
             if horizon_state == "ONLINE_RUNNING":
@@ -344,7 +294,6 @@ class HorizonRemote(Remote):
             else:
                 self.attributes[Attributes.STATE] = States.UNAVAILABLE
             
-            # Notify UC Remote of changes
             self._api.configured_entities.update_attributes(
                 self.id,
                 self.attributes
