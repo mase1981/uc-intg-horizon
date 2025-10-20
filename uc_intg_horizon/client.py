@@ -54,6 +54,8 @@ class HorizonClient:
     async def connect(self) -> bool:
         """
         Connect to Horizon API and authenticate.
+        
+        CRITICAL: This includes waiting for MQTT connection to be fully established.
 
         :return: True if connection successful, False otherwise
         """
@@ -77,15 +79,20 @@ class HorizonClient:
                     country_code=self.country_code,
                 )
             
+            # Connect to API (this starts MQTT connection in background)
+            _LOG.info("Connecting to Horizon API and MQTT broker...")
             await asyncio.to_thread(self._api.connect)
             
-            await asyncio.sleep(3)
+            # CRITICAL: Wait for MQTT connection and device registration to complete
+            # This is what the Home Assistant PRs fixed!
+            _LOG.info("Waiting for MQTT connection and device registration...")
+            await self._wait_for_mqtt_ready()
             
             self._connected = True
             device_count = len(self._api.settop_boxes)
-            _LOG.info("Connected to Horizon API successfully. Devices found: %d", device_count)
+            _LOG.info("✓ Connected to Horizon API successfully. Devices found: %d", device_count)
             
-            # Log token info for debugging (first 20 chars only)
+            # Log token info for debugging
             if hasattr(self._api, 'refresh_token') and self._api.refresh_token:
                 _LOG.debug("Current refresh token: %s...", self._api.refresh_token[:20])
             
@@ -95,6 +102,56 @@ class HorizonClient:
             _LOG.error("Failed to connect to Horizon API: %s", e, exc_info=True)
             self._connected = False
             return False
+
+    async def _wait_for_mqtt_ready(self, timeout: int = 30, check_interval: float = 0.5):
+        """
+        Wait for MQTT connection to be established and devices to be registered.
+        
+        Based on Home Assistant PR #137 - this is critical for reboot survival.
+        
+        :param timeout: Maximum time to wait in seconds
+        :param check_interval: Time between checks in seconds
+        """
+        if not self._api:
+            return
+        
+        elapsed = 0
+        max_wait = timeout
+        
+        _LOG.debug("Waiting for devices to register on MQTT...")
+        
+        while elapsed < max_wait:
+            # Check if we have devices and they're registered
+            if hasattr(self._api, 'settop_boxes') and len(self._api.settop_boxes) > 0:
+                # Check if devices are actually usable (not just discovered)
+                all_ready = True
+                for device_id, box in self._api.settop_boxes.items():
+                    # Check if device has a valid state (indicates MQTT is working)
+                    if not hasattr(box, 'state') or box.state is None:
+                        all_ready = False
+                        _LOG.debug(f"Device {device_id} not ready yet (no state)")
+                        break
+                
+                if all_ready:
+                    _LOG.info(f"✓ All {len(self._api.settop_boxes)} devices registered and ready")
+                    return
+            
+            # Wait a bit before checking again
+            await asyncio.sleep(check_interval)
+            elapsed += check_interval
+            
+            # Log progress every 5 seconds
+            if int(elapsed) % 5 == 0:
+                device_count = len(self._api.settop_boxes) if hasattr(self._api, 'settop_boxes') else 0
+                _LOG.debug(f"Still waiting for MQTT ready... ({elapsed}s elapsed, {device_count} devices found)")
+        
+        # Timeout reached
+        device_count = len(self._api.settop_boxes) if hasattr(self._api, 'settop_boxes') else 0
+        if device_count > 0:
+            _LOG.warning(f"MQTT ready timeout after {timeout}s, but found {device_count} devices - proceeding anyway")
+        else:
+            _LOG.error(f"MQTT ready timeout after {timeout}s with no devices found")
+            raise TimeoutError(f"MQTT connection not ready after {timeout}s")
 
     async def disconnect(self) -> None:
         """Disconnect from Horizon API."""
