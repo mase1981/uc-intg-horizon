@@ -8,7 +8,7 @@ Horizon API client for device communication.
 import asyncio
 import logging
 import os
-from typing import Any, Optional, Callable
+from typing import Any, Optional
 
 import certifi
 from lghorizon import LGHorizonApi, LGHorizonBox
@@ -28,30 +28,23 @@ PROVIDER_TO_COUNTRY = {
 class HorizonClient:
     """Client for communicating with Horizon set-top boxes via lghorizon library."""
 
-    def __init__(
-        self, 
-        provider: str, 
-        username: str, 
-        password: str,
-        token_update_callback: Optional[Callable[[str], None]] = None
-    ):
+    def __init__(self, provider: str, username: str, password: str):
         """
         Initialize Horizon client.
 
         :param provider: Provider name (Ziggo, VirginMedia, etc.)
         :param username: Account username/email
         :param password: Account password or refresh token
-        :param token_update_callback: Callback function to save updated token
         """
         self.provider = provider
         self.username = username
         self.password = password
-        self._token_update_callback = token_update_callback
         self._api: Optional[LGHorizonApi] = None
         self._connected = False
         
         self.country_code = PROVIDER_TO_COUNTRY.get(provider, "nl")
         
+        # Set SSL certificate path
         os.environ['SSL_CERT_FILE'] = certifi.where()
         os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
         
@@ -86,40 +79,22 @@ class HorizonClient:
             
             await asyncio.to_thread(self._api.connect)
             
-            # Check if token was refreshed and save it
-            await self._check_and_save_token()
-            
             await asyncio.sleep(3)
             
             self._connected = True
             device_count = len(self._api.settop_boxes)
             _LOG.info("Connected to Horizon API successfully. Devices found: %d", device_count)
+            
+            # Log token info for debugging (first 20 chars only)
+            if hasattr(self._api, 'refresh_token') and self._api.refresh_token:
+                _LOG.debug("Current refresh token: %s...", self._api.refresh_token[:20])
+            
             return True
             
         except Exception as e:
             _LOG.error("Failed to connect to Horizon API: %s", e, exc_info=True)
             self._connected = False
             return False
-
-    async def _check_and_save_token(self) -> None:
-        """Check if token was refreshed and save it via callback."""
-        if not self._api:
-            return
-            
-        try:
-            # Get the current refresh token from the API
-            new_token = getattr(self._api, 'refresh_token', None)
-            
-            if new_token and new_token != self.password:
-                _LOG.info("Token was refreshed, saving new token")
-                self.password = new_token
-                
-                # Call the callback to save the new token
-                if self._token_update_callback:
-                    await asyncio.to_thread(self._token_update_callback, new_token)
-                    
-        except Exception as e:
-            _LOG.warning("Failed to check/save refreshed token: %s", e)
 
     async def disconnect(self) -> None:
         """Disconnect from Horizon API."""
@@ -132,11 +107,7 @@ class HorizonClient:
             _LOG.error("Error during disconnect: %s", e)
 
     async def get_devices(self) -> list[dict[str, Any]]:
-        """
-        Get list of devices from Horizon account.
-
-        :return: List of device information dicts
-        """
+        """Get list of devices from Horizon account."""
         if not self._connected or not self._api:
             _LOG.warning("Not connected to Horizon API")
             return []
@@ -160,25 +131,14 @@ class HorizonClient:
         return devices
 
     async def get_device_by_id(self, device_id: str) -> Optional[LGHorizonBox]:
-        """
-        Get device object by ID.
-
-        :param device_id: Device identifier
-        :return: LGHorizonBox object or None
-        """
+        """Get device object by ID."""
         if not self._api:
             return None
             
         return self._api.settop_boxes.get(device_id)
 
     async def send_key(self, device_id: str, key: str) -> bool:
-        """
-        Send key press to device.
-
-        :param device_id: Device identifier
-        :param key: Key name (e.g., "Power", "ChannelUp", "Select")
-        :return: True if successful, False otherwise
-        """
+        """Send key press to device."""
         try:
             box = await self.get_device_by_id(device_id)
             if not box:
@@ -194,13 +154,7 @@ class HorizonClient:
             return False
 
     async def set_channel(self, device_id: str, channel_number: str) -> bool:
-        """
-        Set channel on device using digit key sequence.
-
-        :param device_id: Device identifier
-        :param channel_number: Channel number as string (e.g., "103", "401")
-        :return: True if successful, False otherwise
-        """
+        """Set channel on device using digit key sequence."""
         try:
             box = await self.get_device_by_id(device_id)
             if not box:
@@ -244,7 +198,7 @@ class HorizonClient:
             return False
 
     async def power_off(self, device_id: str) -> bool:
-        """Power off device (puts in standby mode)."""
+        """Power off device (standby mode)."""
         try:
             box = await self.get_device_by_id(device_id)
             if not box:
@@ -370,12 +324,7 @@ class HorizonClient:
             return False
 
     async def get_device_state(self, device_id: str) -> dict[str, Any]:
-        """
-        Get current state of device.
-
-        :param device_id: Device identifier
-        :return: Device state dict
-        """
+        """Get current state of device."""
         try:
             box = await self.get_device_by_id(device_id)
             if not box:
