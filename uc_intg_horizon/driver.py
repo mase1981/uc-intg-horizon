@@ -17,7 +17,6 @@ from uc_intg_horizon.media_player import HorizonMediaPlayer
 from uc_intg_horizon.remote import HorizonRemote
 from uc_intg_horizon.setup_manager import SetupManager
 
-# Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s | %(name)-40s | %(levelname)-8s | %(message)s",
@@ -35,13 +34,22 @@ _entities_ready: bool = False
 _initialization_lock: asyncio.Lock = asyncio.Lock()
 
 
-async def _initialize_entities():
+def _on_token_update(new_token: str) -> None:
     """
-    Initialize entities with race condition protection - MANDATORY for reboot survival.
+    Callback for when the refresh token is updated.
     
-    This MUST be called before entities can be subscribed to prevent the race condition
-    where UC Remote tries to subscribe before entities exist.
+    :param new_token: New refresh token
     """
+    global _config
+    
+    if _config:
+        _LOG.info("Updating stored refresh token")
+        _config.password = new_token
+        _config.save_config()
+
+
+async def _initialize_entities():
+    """Initialize entities with race condition protection - MANDATORY for reboot survival."""
     global _config, _client, _media_players, _remotes, api, _entities_ready
     
     async with _initialization_lock:
@@ -56,32 +64,29 @@ async def _initialize_entities():
         _LOG.info("Initializing entities for reboot survival...")
         
         try:
-            # Create Horizon API client
+            # Create Horizon API client with token update callback
             _client = HorizonClient(
                 provider=_config.provider,
                 username=_config.username,
                 password=_config.password,
+                token_update_callback=_on_token_update,  # ← NEW: Token refresh handler
             )
             
-            # Connect to Horizon API
             if not await _client.connect():
                 _LOG.error("Failed to connect to Horizon API during initialization")
                 _entities_ready = False
                 return
             
-            # Clear existing entities
             api.available_entities.clear()
             _media_players.clear()
             _remotes.clear()
             
-            # Create entities for each device
             for device in _config.devices:
                 device_id = device["device_id"]
                 device_name = device["name"]
                 
                 _LOG.info("Creating entities for device: %s (%s)", device_name, device_id)
                 
-                # Create Media Player entity
                 media_player = HorizonMediaPlayer(
                     device_id=device_id,
                     device_name=device_name,
@@ -91,7 +96,6 @@ async def _initialize_entities():
                 _media_players[device_id] = media_player
                 api.available_entities.add(media_player)
                 
-                # Create Remote entity
                 remote = HorizonRemote(
                     device_id=device_id,
                     device_name=device_name,
@@ -101,7 +105,6 @@ async def _initialize_entities():
                 _remotes[device_id] = remote
                 api.available_entities.add(remote)
             
-            # Mark entities as ready BEFORE setting connected state
             _entities_ready = True
             
             _LOG.info(
@@ -127,7 +130,6 @@ async def on_connect() -> None:
     
     _config.reload_from_disk()
     
-    # If configured but entities not ready, initialize them now
     if _config.is_configured() and not _entities_ready:
         _LOG.info("Configuration found but entities missing, reinitializing...")
         try:
@@ -137,7 +139,6 @@ async def on_connect() -> None:
             await api.set_device_state(DeviceStates.ERROR)
             return
     
-    # Set appropriate device state
     if _config.is_configured() and _entities_ready:
         await api.set_device_state(DeviceStates.CONNECTED)
     elif not _config.is_configured():
@@ -152,21 +153,14 @@ async def on_disconnect() -> None:
     
     _LOG.info("Remote disconnected")
     
-    # Disconnect from Horizon API
     if _client:
         await _client.disconnect()
 
 
 async def on_subscribe_entities(entity_ids: list[str]):
-    """
-    Handle entity subscriptions with race condition protection.
-    
-    CRITICAL: This protects against the race condition where UC Remote tries to
-    subscribe before entities are created during system startup.
-    """
+    """Handle entity subscriptions with race condition protection."""
     _LOG.info(f"Entities subscription requested: {entity_ids}")
     
-    # Guard against race condition
     if not _entities_ready:
         _LOG.error("RACE CONDITION: Subscription before entities ready! Attempting recovery...")
         if _config and _config.is_configured():
@@ -183,16 +177,13 @@ async def on_subscribe_entities(entity_ids: list[str]):
     
     _LOG.info(f"Available entities: {available_entity_ids}")
     
-    # Process subscriptions and push initial state
     for entity_id in entity_ids:
-        # Check media players
         for device_id, media_player in _media_players.items():
             if entity_id == media_player.id:
                 await media_player.push_update()
                 _LOG.info(f"Subscribed to media player: {entity_id}")
                 break
         
-        # Check remotes
         for device_id, remote in _remotes.items():
             if entity_id == remote.id:
                 await remote.push_update()
@@ -207,7 +198,6 @@ async def setup_handler(msg: SetupAction) -> SetupAction:
     if not _setup_manager:
         _setup_manager = SetupManager(_config)
     
-    # Handle setup logic
     action = await _setup_manager.handle_setup(msg)
     
     if isinstance(action, SetupComplete):
@@ -230,10 +220,8 @@ async def main():
             _LOG.info(
                 "Found existing configuration, pre-initializing entities for reboot survival"
             )
-            # Create task to initialize entities before UC Remote tries to subscribe
             loop.create_task(_initialize_entities())
         
-        # Register event handlers
         api.add_listener(Events.CONNECT, on_connect)
         api.add_listener(Events.DISCONNECT, on_disconnect)
         api.add_listener(Events.SUBSCRIBE_ENTITIES, on_subscribe_entities)

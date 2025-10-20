@@ -8,8 +8,7 @@ Horizon API client for device communication.
 import asyncio
 import logging
 import os
-import ssl
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 
 import certifi
 from lghorizon import LGHorizonApi, LGHorizonBox
@@ -29,17 +28,25 @@ PROVIDER_TO_COUNTRY = {
 class HorizonClient:
     """Client for communicating with Horizon set-top boxes via lghorizon library."""
 
-    def __init__(self, provider: str, username: str, password: str):
+    def __init__(
+        self, 
+        provider: str, 
+        username: str, 
+        password: str,
+        token_update_callback: Optional[Callable[[str], None]] = None
+    ):
         """
         Initialize Horizon client.
 
         :param provider: Provider name (Ziggo, VirginMedia, etc.)
         :param username: Account username/email
         :param password: Account password or refresh token
+        :param token_update_callback: Callback function to save updated token
         """
         self.provider = provider
         self.username = username
         self.password = password
+        self._token_update_callback = token_update_callback
         self._api: Optional[LGHorizonApi] = None
         self._connected = False
         
@@ -79,6 +86,9 @@ class HorizonClient:
             
             await asyncio.to_thread(self._api.connect)
             
+            # Check if token was refreshed and save it
+            await self._check_and_save_token()
+            
             await asyncio.sleep(3)
             
             self._connected = True
@@ -90,6 +100,26 @@ class HorizonClient:
             _LOG.error("Failed to connect to Horizon API: %s", e, exc_info=True)
             self._connected = False
             return False
+
+    async def _check_and_save_token(self) -> None:
+        """Check if token was refreshed and save it via callback."""
+        if not self._api:
+            return
+            
+        try:
+            # Get the current refresh token from the API
+            new_token = getattr(self._api, 'refresh_token', None)
+            
+            if new_token and new_token != self.password:
+                _LOG.info("Token was refreshed, saving new token")
+                self.password = new_token
+                
+                # Call the callback to save the new token
+                if self._token_update_callback:
+                    await asyncio.to_thread(self._token_update_callback, new_token)
+                    
+        except Exception as e:
+            _LOG.warning("Failed to check/save refreshed token: %s", e)
 
     async def disconnect(self) -> None:
         """Disconnect from Horizon API."""
@@ -200,12 +230,7 @@ class HorizonClient:
             return False
 
     async def power_on(self, device_id: str) -> bool:
-        """
-        Power on device.
-
-        :param device_id: Device identifier
-        :return: True if successful
-        """
+        """Power on device."""
         try:
             box = await self.get_device_by_id(device_id)
             if not box:
@@ -219,12 +244,7 @@ class HorizonClient:
             return False
 
     async def power_off(self, device_id: str) -> bool:
-        """
-        Power off device (puts in standby mode).
-
-        :param device_id: Device identifier
-        :return: True if successful
-        """
+        """Power off device (puts in standby mode)."""
         try:
             box = await self.get_device_by_id(device_id)
             if not box:
