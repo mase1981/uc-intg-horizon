@@ -5,6 +5,7 @@ Media Player entity for Horizon integration.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -73,7 +74,7 @@ class HorizonMediaPlayer(MediaPlayer):
 
         _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
         
-        self._api.loop.create_task(self._load_sources())
+        asyncio.create_task(self._load_sources())
 
     async def _load_sources(self):
         try:
