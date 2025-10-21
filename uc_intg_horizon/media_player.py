@@ -38,13 +38,12 @@ class HorizonMediaPlayer(MediaPlayer):
         self._client = client
         self._api = api
 
-        # Media player features - all using Commands enum (no Buttons here)
         features = [
             Features.ON_OFF,
             Features.TOGGLE,
             Features.VOLUME_UP_DOWN,
             Features.MUTE_TOGGLE,
-            Features.PLAY_PAUSE,  # This is a Features constant - OK
+            Features.PLAY_PAUSE,
             Features.STOP,
             Features.NEXT,
             Features.PREVIOUS,
@@ -109,7 +108,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     await self._client.power_on(self._device_id)
                     self.attributes[Attributes.STATE] = States.ON
 
-            elif cmd_id == Commands.PLAY_PAUSE:  # Commands.PLAY_PAUSE exists - OK
+            elif cmd_id == Commands.PLAY_PAUSE:
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state == States.PLAYING:
                     await self._client.pause(self._device_id)
@@ -137,6 +136,7 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.RECORD:
                 await self._client.record(self._device_id)
 
+            # FIXED: Volume commands now use correct Horizon key names
             elif cmd_id == Commands.VOLUME_UP:
                 await self._client.send_key(self._device_id, "VolumeUp")
                 
@@ -148,26 +148,28 @@ class HorizonMediaPlayer(MediaPlayer):
                 muted = self.attributes.get(Attributes.MUTED, False)
                 self.attributes[Attributes.MUTED] = not muted
 
+            # FIXED: Navigation commands now use correct Horizon key names
             elif cmd_id == Commands.CURSOR_UP:
-                await self._client.send_key(self._device_id, "Up")
+                await self._client.send_key(self._device_id, "ArrowUp")
                 
             elif cmd_id == Commands.CURSOR_DOWN:
-                await self._client.send_key(self._device_id, "Down")
+                await self._client.send_key(self._device_id, "ArrowDown")
                 
             elif cmd_id == Commands.CURSOR_LEFT:
-                await self._client.send_key(self._device_id, "Left")
+                await self._client.send_key(self._device_id, "ArrowLeft")
                 
             elif cmd_id == Commands.CURSOR_RIGHT:
-                await self._client.send_key(self._device_id, "Right")
+                await self._client.send_key(self._device_id, "ArrowRight")
                 
             elif cmd_id == Commands.CURSOR_ENTER:
-                await self._client.send_key(self._device_id, "Select")
+                await self._client.send_key(self._device_id, "Ok")
 
+            # Menu commands - FIXED
             elif cmd_id == Commands.HOME:
                 await self._client.send_key(self._device_id, "Home")
                 
             elif cmd_id == Commands.MENU:
-                await self._client.send_key(self._device_id, "Menu")
+                await self._client.send_key(self._device_id, "ContextMenu")
                 
             elif cmd_id == Commands.CONTEXT_MENU:
                 await self._client.send_key(self._device_id, "Options")

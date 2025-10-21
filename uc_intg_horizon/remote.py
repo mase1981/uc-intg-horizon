@@ -34,14 +34,6 @@ class HorizonRemote(Remote):
         client: HorizonClient,
         api,
     ):
-        """
-        Initialize Horizon Remote entity.
-
-        :param device_id: Unique device identifier
-        :param device_name: Device display name
-        :param client: Horizon API client
-        :param api: Integration API instance
-        """
         self._device_id = device_id
         self._client = client
         self._api = api
@@ -73,7 +65,7 @@ class HorizonRemote(Remote):
             create_btn_mapping(Buttons.MUTE, short="MUTE"),
             create_btn_mapping(Buttons.CHANNEL_UP, short="CHANNEL_UP"),
             create_btn_mapping(Buttons.CHANNEL_DOWN, short="CHANNEL_DOWN"),
-            create_btn_mapping(Buttons.PLAY, short="PLAYPAUSE"),  # Physical play/pause button
+            create_btn_mapping(Buttons.PLAY, short="PLAYPAUSE"),
             create_btn_mapping(Buttons.STOP, short="STOP"),
             create_btn_mapping(Buttons.RECORD, short="RECORD"),
             create_btn_mapping(Buttons.PREV, short="REWIND"),
@@ -123,7 +115,6 @@ class HorizonRemote(Remote):
         page.add(create_ui_icon("uc:right-arrow", 3, 2, cmd="RIGHT"))
         page.add(create_ui_icon("uc:down-arrow", 1, 3, cmd="DOWN"))
         
-        # Use PLAYPAUSE for play/pause toggle button
         page.add(create_ui_icon("uc:play-pause", 0, 4, size=Size(2, 1), cmd="PLAYPAUSE"))
         page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
         page.add(create_ui_icon("uc:record", 3, 4, cmd="RECORD"))
@@ -188,14 +179,6 @@ class HorizonRemote(Remote):
         return page
 
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
-        """
-        Handle remote control commands.
-
-        :param entity: Entity instance
-        :param cmd_id: Command identifier
-        :param params: Command parameters
-        :return: Status code
-        """
         _LOG.info("Remote command: %s (params=%s)", cmd_id, params)
 
         try:
@@ -236,48 +219,60 @@ class HorizonRemote(Remote):
             return StatusCodes.SERVER_ERROR
 
     async def _send_simple_command(self, command: str) -> None:
-        """
-        Send simple command to device.
-
-        :param command: Command string
-        """
         command_map = {
+            # Power
             "POWER": "Power",
-            "UP": "Up",
-            "DOWN": "Down",
-            "LEFT": "Left",
-            "RIGHT": "Right",
-            "SELECT": "Select",
+            
+            # Navigation
+            "UP": "ArrowUp",
+            "DOWN": "ArrowDown",
+            "LEFT": "ArrowLeft",
+            "RIGHT": "ArrowRight",
+            "SELECT": "Ok",
             "BACK": "Back",
-            "PLAYPAUSE": "PlayPause",  # Maps to Horizon's PlayPause command
-            "STOP": "Stop",
-            "RECORD": "Record",
-            "REWIND": "Rewind",
-            "FASTFORWARD": "FastForward",
+            
+            # Playback
+            "PLAYPAUSE": "MediaPlayPause",
+            "STOP": "MediaStop",
+            "RECORD": "MediaRecord",
+            "REWIND": "MediaRewind",
+            "FASTFORWARD": "MediaFastForward",
+            
+            # Volume
             "VOLUME_UP": "VolumeUp",
             "VOLUME_DOWN": "VolumeDown",
             "MUTE": "Mute",
+            
+            # Channel
             "CHANNEL_UP": "ChannelUp",
             "CHANNEL_DOWN": "ChannelDown",
             "GUIDE": "Guide",
             "INFO": "Info",
+            
+            # Colors
             "RED": "Red",
             "GREEN": "Green",
             "YELLOW": "Yellow",
             "BLUE": "Blue",
+            
+            # Menu
             "HOME": "Home",
-            "MENU": "Menu",
+            "MENU": "ContextMenu",
             "OPTIONS": "Options",
             "HELP": "Help",
         }
         
         for i in range(10):
-            command_map[str(i)] = f"Digit{i}"
+            command_map[str(i)] = str(i)
         
-        horizon_key = command_map.get(command, command)
+        horizon_key = command_map.get(command)
         
+        if not horizon_key:
+            _LOG.warning("Unknown command: %s", command)
+            return
+        
+        _LOG.info("Sending command: %s -> Horizon key: %s", command, horizon_key)
         await self._client.send_key(self._device_id, horizon_key)
-        _LOG.debug("Sent simple command: %s -> %s", command, horizon_key)
 
     async def push_update(self) -> None:
         """Push entity state update to Remote."""
