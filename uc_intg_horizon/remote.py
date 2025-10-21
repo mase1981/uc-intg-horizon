@@ -39,7 +39,7 @@ class HorizonRemote(Remote):
         self._api = api
 
         simple_commands = [
-            "POWER_ON", "POWER_OFF",
+            "POWER_ON", "POWER_OFF", "POWER_TOGGLE",
             "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK",
             "PLAY", "PAUSE", "STOP", "RECORD", "REWIND", "FASTFORWARD",
             "VOLUME_UP", "VOLUME_DOWN", "MUTE",
@@ -212,16 +212,17 @@ class HorizonRemote(Remote):
 
     async def _send_simple_command(self, command: str) -> None:
         command_map = {
-            "POWER_ON": "Power",
-            "POWER_OFF": "Power",
+            "POWER_ON": "PowerOn",
+            "POWER_OFF": "PowerOff",
+            "POWER_TOGGLE": "PowerToggle",
             "UP": "ArrowUp",
             "DOWN": "ArrowDown",
             "LEFT": "ArrowLeft",
             "RIGHT": "ArrowRight",
             "SELECT": "Ok",
             "BACK": "Back",
-            "PLAY": "MediaPlayPause",
-            "PAUSE": "MediaPlayPause",
+            "PLAY": "MediaPlay",
+            "PAUSE": "MediaPause",
             "STOP": "MediaStop",
             "RECORD": "MediaRecord",
             "REWIND": "MediaRewind",
