@@ -177,8 +177,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "Enter")
 
             elif cmd_id == Commands.HOME:
-                _LOG.info("Media Player: Home -> Home")
-                await self._client.send_key(self._device_id, "Home")
+                _LOG.info("Media Player: Home -> MediaTopMenu")
+                await self._client.send_key(self._device_id, "MediaTopMenu")
                 
             elif cmd_id == Commands.MENU:
                 _LOG.info("Media Player: Menu -> Info")
@@ -197,8 +197,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "Info")
                 
             elif cmd_id == Commands.BACK:
-                _LOG.info("Media Player: Back -> Back")
-                await self._client.send_key(self._device_id, "Back")
+                _LOG.info("Media Player: Back -> Escape")
+                await self._client.send_key(self._device_id, "Escape")
 
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
