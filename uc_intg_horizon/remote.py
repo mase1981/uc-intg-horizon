@@ -43,10 +43,10 @@ class HorizonRemote(Remote):
             "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK",
             "PLAYPAUSE", "STOP", "RECORD", "REWIND", "FASTFORWARD",
             "VOLUME_UP", "VOLUME_DOWN", "MUTE",
-            "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE", "INFO",
+            "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
             "RED", "GREEN", "YELLOW", "BLUE",
-            "HOME", "TV", "MENU", "OPTIONS", "HELP",
+            "HOME", "TV", "MENU", "SOURCE",
         ]
 
         button_mapping = [
@@ -101,8 +101,8 @@ class HorizonRemote(Remote):
         
         page.add(create_ui_text("ON", 0, 0, cmd="POWER_ON"))
         page.add(create_ui_text("OFF", 1, 0, cmd="POWER_OFF"))
-        page.add(create_ui_icon("uc:home", 2, 0, cmd="HOME"))
-        page.add(create_ui_text("TV", 3, 0, cmd="TV"))
+        page.add(create_ui_text("TV", 2, 0, cmd="TV"))
+        page.add(create_ui_text("SRC", 3, 0, cmd="SOURCE"))
         
         page.add(create_ui_icon("uc:up-arrow", 1, 1, cmd="UP"))
         page.add(create_ui_icon("uc:left-arrow", 0, 2, cmd="LEFT"))
@@ -114,10 +114,10 @@ class HorizonRemote(Remote):
         page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
         page.add(create_ui_text("REC", 3, 4, cmd="RECORD"))
         
-        page.add(create_ui_icon("uc:info", 0, 5, cmd="INFO"))
+        page.add(create_ui_icon("uc:home", 0, 5, cmd="HOME"))
         page.add(create_ui_icon("uc:back", 1, 5, cmd="BACK"))
-        page.add(create_ui_icon("uc:menu", 2, 5, cmd="OPTIONS"))
-        page.add(create_ui_text("Help", 3, 5, cmd="HELP"))
+        page.add(create_ui_icon("uc:menu", 2, 5, cmd="MENU"))
+        page.add(create_ui_icon("uc:guide", 3, 5, cmd="GUIDE"))
         
         return page
 
@@ -164,7 +164,7 @@ class HorizonRemote(Remote):
         page.add(create_ui_text("GREEN", 2, 1, size=Size(2, 2), cmd="GREEN"))
         page.add(create_ui_text("YELLOW", 0, 3, size=Size(2, 2), cmd="YELLOW"))
         page.add(create_ui_text("BLUE", 2, 3, size=Size(2, 2), cmd="BLUE"))
-        page.add(create_ui_icon("uc:info", 1, 5, size=Size(2, 1), cmd="INFO"))
+        page.add(create_ui_icon("uc:guide", 1, 5, size=Size(2, 1), cmd="GUIDE"))
         
         return page
 
@@ -236,27 +236,25 @@ class HorizonRemote(Remote):
             "LEFT": "ArrowLeft",
             "RIGHT": "ArrowRight",
             "SELECT": "Ok",
-            "BACK": "Back",
+            "BACK": "Return",
             "STOP": "MediaStop",
             "RECORD": "MediaRecord",
             "REWIND": "MediaRewind",
             "FASTFORWARD": "MediaFastForward",
             "VOLUME_UP": "VolumeUp",
             "VOLUME_DOWN": "VolumeDown",
-            "MUTE": "Mute",
+            "MUTE": "VolumeMute",
             "CHANNEL_UP": "ChannelUp",
             "CHANNEL_DOWN": "ChannelDown",
             "GUIDE": "Guide",
-            "INFO": "Info",
             "RED": "Red",
             "GREEN": "Green",
             "YELLOW": "Yellow",
             "BLUE": "Blue",
-            "HOME": "Home",
-            "TV": "Exit",
-            "MENU": "ContextMenu",
-            "OPTIONS": "Options",
-            "HELP": "Help",
+            "HOME": "Menu",
+            "TV": "MediaPrevious",
+            "MENU": "Info",
+            "SOURCE": "Settings",
         }
         
         for i in range(10):

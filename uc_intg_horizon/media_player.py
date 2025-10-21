@@ -59,6 +59,8 @@ class HorizonMediaPlayer(MediaPlayer):
             Attributes.MEDIA_TITLE: "",
             Attributes.MEDIA_IMAGE_URL: "",
             Attributes.MUTED: False,
+            Attributes.SOURCE: "",
+            Attributes.SOURCE_LIST: [],
         }
 
         super().__init__(
@@ -70,6 +72,17 @@ class HorizonMediaPlayer(MediaPlayer):
         )
 
         _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
+        
+        self._api.loop.create_task(self._load_sources())
+
+    async def _load_sources(self):
+        try:
+            sources = await self._client.get_sources(self._device_id)
+            source_list = [source["name"] for source in sources]
+            self.attributes[Attributes.SOURCE_LIST] = source_list
+            _LOG.info(f"Loaded {len(source_list)} sources for {self._device_id}")
+        except Exception as e:
+            _LOG.error(f"Failed to load sources: {e}")
 
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
@@ -137,8 +150,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "VolumeDown")
                 
             elif cmd_id == Commands.MUTE_TOGGLE:
-                _LOG.info("Media Player: Mute toggle -> Mute")
-                await self._client.send_key(self._device_id, "Mute")
+                _LOG.info("Media Player: Mute toggle -> VolumeMute")
+                await self._client.send_key(self._device_id, "VolumeMute")
                 muted = self.attributes.get(Attributes.MUTED, False)
                 self.attributes[Attributes.MUTED] = not muted
 
@@ -163,12 +176,12 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "Ok")
 
             elif cmd_id == Commands.HOME:
-                _LOG.info("Media Player: Home -> Home")
-                await self._client.send_key(self._device_id, "Home")
+                _LOG.info("Media Player: Home -> Menu")
+                await self._client.send_key(self._device_id, "Menu")
                 
             elif cmd_id == Commands.MENU:
-                _LOG.info("Media Player: Menu -> ContextMenu")
-                await self._client.send_key(self._device_id, "ContextMenu")
+                _LOG.info("Media Player: Menu -> Info")
+                await self._client.send_key(self._device_id, "Info")
                 
             elif cmd_id == Commands.CONTEXT_MENU:
                 _LOG.info("Media Player: Context menu -> Options")
@@ -183,8 +196,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "Info")
                 
             elif cmd_id == Commands.BACK:
-                _LOG.info("Media Player: Back -> Back")
-                await self._client.send_key(self._device_id, "Back")
+                _LOG.info("Media Player: Back -> Return")
+                await self._client.send_key(self._device_id, "Return")
 
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
@@ -196,9 +209,19 @@ class HorizonMediaPlayer(MediaPlayer):
                 
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
-                    channel = params["source"]
-                    _LOG.info(f"Media Player: Select source (channel {channel})")
-                    await self._client.set_channel(self._device_id, channel)
+                    source = params["source"]
+                    _LOG.info(f"Media Player: Select source: {source}")
+                    
+                    if source.startswith("HDMI"):
+                        await self._client.send_key(self._device_id, "Settings")
+                        _LOG.info("Opened settings for HDMI input selection")
+                    elif source in ["Netflix", "BBC iPlayer", "ITVX", "All 4", "My5", "Prime Video", "YouTube", "Disney+"]:
+                        await self._client.send_key(self._device_id, "Menu")
+                        _LOG.info(f"Opened menu to navigate to {source}")
+                    else:
+                        await self._client.set_channel(self._device_id, source)
+                    
+                    self.attributes[Attributes.SOURCE] = source
                 else:
                     _LOG.warning("SELECT_SOURCE called without source parameter")
                     return StatusCodes.BAD_REQUEST

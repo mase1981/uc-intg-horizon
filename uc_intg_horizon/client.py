@@ -24,6 +24,25 @@ PROVIDER_TO_COUNTRY = {
     "Magenta": "at",
 }
 
+COMMON_INPUTS = [
+    {"id": "hdmi1", "name": "HDMI 1"},
+    {"id": "hdmi2", "name": "HDMI 2"},
+    {"id": "hdmi3", "name": "HDMI 3"},
+    {"id": "hdmi4", "name": "HDMI 4"},
+    {"id": "av", "name": "AV Input"},
+]
+
+COMMON_APPS = [
+    {"id": "netflix", "name": "Netflix"},
+    {"id": "iplayer", "name": "BBC iPlayer"},
+    {"id": "itv", "name": "ITVX"},
+    {"id": "all4", "name": "All 4"},
+    {"id": "my5", "name": "My5"},
+    {"id": "prime", "name": "Prime Video"},
+    {"id": "youtube", "name": "YouTube"},
+    {"id": "disney", "name": "Disney+"},
+]
+
 
 class HorizonClient:
     """Client for communicating with Horizon set-top boxes via lghorizon library."""
@@ -154,6 +173,15 @@ class HorizonClient:
             return None
             
         return self._api.settop_boxes.get(device_id)
+
+    async def get_sources(self, device_id: str) -> list[dict[str, str]]:
+        sources = []
+        
+        sources.extend(COMMON_INPUTS)
+        sources.extend(COMMON_APPS)
+        
+        _LOG.info(f"Returning {len(sources)} sources for {device_id}")
+        return sources
 
     async def send_key(self, device_id: str, key: str) -> bool:
         try:
