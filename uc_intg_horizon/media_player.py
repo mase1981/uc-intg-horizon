@@ -173,12 +173,12 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "ArrowRight")
                 
             elif cmd_id == Commands.CURSOR_ENTER:
-                _LOG.info("Media Player: Cursor enter -> Ok")
-                await self._client.send_key(self._device_id, "Ok")
+                _LOG.info("Media Player: Cursor enter -> Enter")
+                await self._client.send_key(self._device_id, "Enter")
 
             elif cmd_id == Commands.HOME:
-                _LOG.info("Media Player: Home -> Menu")
-                await self._client.send_key(self._device_id, "Menu")
+                _LOG.info("Media Player: Home -> Home")
+                await self._client.send_key(self._device_id, "Home")
                 
             elif cmd_id == Commands.MENU:
                 _LOG.info("Media Player: Menu -> Info")
@@ -197,8 +197,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.send_key(self._device_id, "Info")
                 
             elif cmd_id == Commands.BACK:
-                _LOG.info("Media Player: Back -> Return")
-                await self._client.send_key(self._device_id, "Return")
+                _LOG.info("Media Player: Back -> Back")
+                await self._client.send_key(self._device_id, "Back")
 
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")

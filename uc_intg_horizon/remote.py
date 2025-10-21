@@ -191,6 +191,7 @@ class HorizonRemote(Remote):
             elif cmd_id == Commands.SEND_CMD:
                 command = params.get("command") if params else None
                 if command:
+                    _LOG.info(f"SEND_CMD received: {command}")
                     await self._send_simple_command(command)
                 else:
                     _LOG.warning("SEND_CMD without command parameter")
@@ -208,35 +209,41 @@ class HorizonRemote(Remote):
             return StatusCodes.SERVER_ERROR
 
     async def _send_simple_command(self, command: str) -> None:
-        _LOG.info(f"Processing simple command: {command}")
+        _LOG.info(f">>> Processing simple command: {command}")
         
         if command == "POWER_ON":
-            _LOG.info("Calling power_on()")
+            _LOG.info(">>> Calling power_on()")
             await self._client.power_on(self._device_id)
+            _LOG.info(">>> power_on() completed")
             return
             
         elif command == "POWER_OFF":
-            _LOG.info("Calling power_off()")
+            _LOG.info(">>> Calling power_off()")
             await self._client.power_off(self._device_id)
+            _LOG.info(">>> power_off() completed")
             return
             
         elif command == "POWER_TOGGLE":
-            _LOG.info("Calling power_toggle()")
+            _LOG.info(">>> Calling power_toggle()")
             await self._client.power_toggle(self._device_id)
+            _LOG.info(">>> power_toggle() completed")
             return
             
         elif command == "PLAYPAUSE":
-            _LOG.info("Calling play_pause_toggle()")
+            _LOG.info(">>> Calling play_pause_toggle()")
             await self._client.play_pause_toggle(self._device_id)
+            _LOG.info(">>> play_pause_toggle() completed")
             return
+        
+        _LOG.info(f">>> Building command map for: {command}")
         
         command_map = {
             "UP": "ArrowUp",
             "DOWN": "ArrowDown",
             "LEFT": "ArrowLeft",
             "RIGHT": "ArrowRight",
-            "SELECT": "Ok",
-            "BACK": "Return",
+            "SELECT": "Enter",
+            "BACK": "Back",
             "STOP": "MediaStop",
             "RECORD": "MediaRecord",
             "REWIND": "MediaRewind",
@@ -251,8 +258,8 @@ class HorizonRemote(Remote):
             "GREEN": "Green",
             "YELLOW": "Yellow",
             "BLUE": "Blue",
-            "HOME": "Menu",
-            "TV": "MediaPrevious",
+            "HOME": "Home",
+            "TV": "Exit",
             "MENU": "Info",
             "SOURCE": "Settings",
         }
@@ -263,12 +270,15 @@ class HorizonRemote(Remote):
         horizon_key = command_map.get(command)
         
         if not horizon_key:
-            _LOG.warning(f"Unknown command: {command}")
+            _LOG.warning(f">>> Unknown command: {command}")
             return
         
-        _LOG.info(f"Sending: {command} -> {horizon_key}")
+        _LOG.info(f">>> Mapped: {command} -> {horizon_key}")
+        _LOG.info(f">>> Calling send_key({self._device_id}, {horizon_key})")
+        
         await self._client.send_key(self._device_id, horizon_key)
-        _LOG.debug(f"Command sent successfully: {horizon_key}")
+        
+        _LOG.info(f">>> send_key completed successfully for {horizon_key}")
 
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):
