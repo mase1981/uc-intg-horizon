@@ -26,14 +26,6 @@ class HorizonMediaPlayer(MediaPlayer):
         client: HorizonClient,
         api,
     ):
-        """
-        Initialize Horizon Media Player entity.
-
-        :param device_id: Unique device identifier
-        :param device_name: Device display name
-        :param client: Horizon API client
-        :param api: Integration API instance
-        """
         self._device_id = device_id
         self._client = client
         self._api = api
@@ -80,14 +72,6 @@ class HorizonMediaPlayer(MediaPlayer):
         _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
 
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
-        """
-        Handle media player commands.
-
-        :param entity: Entity instance
-        :param cmd_id: Command identifier
-        :param params: Command parameters
-        :return: Status code
-        """
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
         try:
@@ -136,7 +120,6 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.RECORD:
                 await self._client.record(self._device_id)
 
-            # FIXED: Volume commands now use correct Horizon key names
             elif cmd_id == Commands.VOLUME_UP:
                 await self._client.send_key(self._device_id, "VolumeUp")
                 
@@ -148,7 +131,6 @@ class HorizonMediaPlayer(MediaPlayer):
                 muted = self.attributes.get(Attributes.MUTED, False)
                 self.attributes[Attributes.MUTED] = not muted
 
-            # FIXED: Navigation commands now use correct Horizon key names
             elif cmd_id == Commands.CURSOR_UP:
                 await self._client.send_key(self._device_id, "ArrowUp")
                 
@@ -164,7 +146,6 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CURSOR_ENTER:
                 await self._client.send_key(self._device_id, "Ok")
 
-            # Menu commands - FIXED
             elif cmd_id == Commands.HOME:
                 await self._client.send_key(self._device_id, "Home")
                 
@@ -209,10 +190,8 @@ class HorizonMediaPlayer(MediaPlayer):
             return StatusCodes.SERVER_ERROR
 
     async def push_update(self) -> None:
-        """Push entity state update to Remote."""
         if self._api and self._api.configured_entities.contains(self.id):
             device_state = await self._client.get_device_state(self._device_id)
-            
             horizon_state = device_state.get("state", "unavailable")
             
             if horizon_state == "ONLINE_RUNNING":
@@ -236,8 +215,5 @@ class HorizonMediaPlayer(MediaPlayer):
             if device_state.get("media_image"):
                 self.attributes[Attributes.MEDIA_IMAGE_URL] = device_state["media_image"]
             
-            self._api.configured_entities.update_attributes(
-                self.id,
-                self.attributes
-            )
-            _LOG.debug("Pushed update for %s: state=%s", self.id, self.attributes[Attributes.STATE])
+            self._api.configured_entities.update_attributes(self.id, self.attributes)
+            _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])
