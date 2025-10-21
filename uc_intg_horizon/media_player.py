@@ -84,21 +84,19 @@ class HorizonMediaPlayer(MediaPlayer):
                 self.attributes[Attributes.STATE] = States.STANDBY
                 
             elif cmd_id == Commands.TOGGLE:
+                await self._client.power_toggle(self._device_id)
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state in [States.ON, States.PLAYING, States.PAUSED]:
-                    await self._client.power_off(self._device_id)
                     self.attributes[Attributes.STATE] = States.STANDBY
                 else:
-                    await self._client.power_on(self._device_id)
                     self.attributes[Attributes.STATE] = States.ON
 
             elif cmd_id == Commands.PLAY_PAUSE:
+                await self._client.play_pause_toggle(self._device_id)
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state == States.PLAYING:
-                    await self._client.pause(self._device_id)
                     self.attributes[Attributes.STATE] = States.PAUSED
                 else:
-                    await self._client.play(self._device_id)
                     self.attributes[Attributes.STATE] = States.PLAYING
                 
             elif cmd_id == Commands.STOP:
