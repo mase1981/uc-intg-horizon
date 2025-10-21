@@ -41,12 +41,12 @@ class HorizonRemote(Remote):
         simple_commands = [
             "POWER_ON", "POWER_OFF", "POWER_TOGGLE",
             "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK",
-            "PLAY", "PAUSE", "PLAYPAUSE", "STOP", "RECORD", "REWIND", "FASTFORWARD",
+            "PLAYPAUSE", "STOP", "RECORD", "REWIND", "FASTFORWARD",
             "VOLUME_UP", "VOLUME_DOWN", "MUTE",
             "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE", "INFO",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
             "RED", "GREEN", "YELLOW", "BLUE",
-            "HOME", "MENU", "OPTIONS", "HELP",
+            "HOME", "TV", "MENU", "OPTIONS", "HELP",
         ]
 
         button_mapping = [
@@ -102,7 +102,7 @@ class HorizonRemote(Remote):
         page.add(create_ui_text("ON", 0, 0, cmd="POWER_ON"))
         page.add(create_ui_text("OFF", 1, 0, cmd="POWER_OFF"))
         page.add(create_ui_icon("uc:home", 2, 0, cmd="HOME"))
-        page.add(create_ui_icon("uc:info", 3, 0, cmd="INFO"))
+        page.add(create_ui_text("TV", 3, 0, cmd="TV"))
         
         page.add(create_ui_icon("uc:up-arrow", 1, 1, cmd="UP"))
         page.add(create_ui_icon("uc:left-arrow", 0, 2, cmd="LEFT"))
@@ -114,9 +114,9 @@ class HorizonRemote(Remote):
         page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
         page.add(create_ui_text("REC", 3, 4, cmd="RECORD"))
         
-        page.add(create_ui_text("Guide", 0, 5, cmd="GUIDE"))
+        page.add(create_ui_icon("uc:info", 0, 5, cmd="INFO"))
         page.add(create_ui_icon("uc:back", 1, 5, cmd="BACK"))
-        page.add(create_ui_icon("uc:menu", 2, 5, cmd="MENU"))
+        page.add(create_ui_icon("uc:menu", 2, 5, cmd="OPTIONS"))
         page.add(create_ui_text("Help", 3, 5, cmd="HELP"))
         
         return page
@@ -208,55 +208,69 @@ class HorizonRemote(Remote):
             return StatusCodes.SERVER_ERROR
 
     async def _send_simple_command(self, command: str) -> None:
+        _LOG.info(f"Processing simple command: {command}")
+        
         if command == "POWER_ON":
+            _LOG.info("Calling power_on()")
             await self._client.power_on(self._device_id)
+            return
+            
         elif command == "POWER_OFF":
+            _LOG.info("Calling power_off()")
             await self._client.power_off(self._device_id)
+            return
+            
         elif command == "POWER_TOGGLE":
+            _LOG.info("Calling power_toggle()")
             await self._client.power_toggle(self._device_id)
+            return
+            
         elif command == "PLAYPAUSE":
+            _LOG.info("Calling play_pause_toggle()")
             await self._client.play_pause_toggle(self._device_id)
-        elif command == "STOP":
-            await self._client.stop(self._device_id)
-        else:
-            command_map = {
-                "UP": "ArrowUp",
-                "DOWN": "ArrowDown",
-                "LEFT": "ArrowLeft",
-                "RIGHT": "ArrowRight",
-                "SELECT": "Ok",
-                "BACK": "Back",
-                "RECORD": "MediaRecord",
-                "REWIND": "MediaRewind",
-                "FASTFORWARD": "MediaFastForward",
-                "VOLUME_UP": "VolumeUp",
-                "VOLUME_DOWN": "VolumeDown",
-                "MUTE": "Mute",
-                "CHANNEL_UP": "ChannelUp",
-                "CHANNEL_DOWN": "ChannelDown",
-                "GUIDE": "Guide",
-                "INFO": "Info",
-                "RED": "Red",
-                "GREEN": "Green",
-                "YELLOW": "Yellow",
-                "BLUE": "Blue",
-                "HOME": "Home",
-                "MENU": "ContextMenu",
-                "OPTIONS": "Options",
-                "HELP": "Help",
-            }
-            
-            for i in range(10):
-                command_map[str(i)] = str(i)
-            
-            horizon_key = command_map.get(command)
-            
-            if not horizon_key:
-                _LOG.warning("Unknown command: %s", command)
-                return
-            
-            _LOG.info("Sending: %s -> %s", command, horizon_key)
-            await self._client.send_key(self._device_id, horizon_key)
+            return
+        
+        command_map = {
+            "UP": "ArrowUp",
+            "DOWN": "ArrowDown",
+            "LEFT": "ArrowLeft",
+            "RIGHT": "ArrowRight",
+            "SELECT": "Ok",
+            "BACK": "Back",
+            "STOP": "MediaStop",
+            "RECORD": "MediaRecord",
+            "REWIND": "MediaRewind",
+            "FASTFORWARD": "MediaFastForward",
+            "VOLUME_UP": "VolumeUp",
+            "VOLUME_DOWN": "VolumeDown",
+            "MUTE": "Mute",
+            "CHANNEL_UP": "ChannelUp",
+            "CHANNEL_DOWN": "ChannelDown",
+            "GUIDE": "Guide",
+            "INFO": "Info",
+            "RED": "Red",
+            "GREEN": "Green",
+            "YELLOW": "Yellow",
+            "BLUE": "Blue",
+            "HOME": "Home",
+            "TV": "Exit",
+            "MENU": "ContextMenu",
+            "OPTIONS": "Options",
+            "HELP": "Help",
+        }
+        
+        for i in range(10):
+            command_map[str(i)] = str(i)
+        
+        horizon_key = command_map.get(command)
+        
+        if not horizon_key:
+            _LOG.warning(f"Unknown command: {command}")
+            return
+        
+        _LOG.info(f"Sending: {command} -> {horizon_key}")
+        await self._client.send_key(self._device_id, horizon_key)
+        _LOG.debug(f"Command sent successfully: {horizon_key}")
 
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):

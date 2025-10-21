@@ -76,14 +76,17 @@ class HorizonMediaPlayer(MediaPlayer):
 
         try:
             if cmd_id == Commands.ON:
+                _LOG.info("Media Player: Powering on")
                 await self._client.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
                 
             elif cmd_id == Commands.OFF:
+                _LOG.info("Media Player: Powering off")
                 await self._client.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.STANDBY
                 
             elif cmd_id == Commands.TOGGLE:
+                _LOG.info("Media Player: Toggling power")
                 await self._client.power_toggle(self._device_id)
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state in [States.ON, States.PLAYING, States.PAUSED]:
@@ -92,6 +95,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     self.attributes[Attributes.STATE] = States.ON
 
             elif cmd_id == Commands.PLAY_PAUSE:
+                _LOG.info("Media Player: Play/Pause toggle")
                 await self._client.play_pause_toggle(self._device_id)
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state == States.PLAYING:
@@ -100,77 +104,100 @@ class HorizonMediaPlayer(MediaPlayer):
                     self.attributes[Attributes.STATE] = States.PLAYING
                 
             elif cmd_id == Commands.STOP:
+                _LOG.info("Media Player: Stop")
                 await self._client.stop(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
                 
             elif cmd_id == Commands.NEXT:
+                _LOG.info("Media Player: Next channel")
                 await self._client.next_channel(self._device_id)
                 
             elif cmd_id == Commands.PREVIOUS:
+                _LOG.info("Media Player: Previous channel")
                 await self._client.previous_channel(self._device_id)
                 
             elif cmd_id == Commands.FAST_FORWARD:
+                _LOG.info("Media Player: Fast forward")
                 await self._client.fast_forward(self._device_id)
                 
             elif cmd_id == Commands.REWIND:
+                _LOG.info("Media Player: Rewind")
                 await self._client.rewind(self._device_id)
                 
             elif cmd_id == Commands.RECORD:
+                _LOG.info("Media Player: Record")
                 await self._client.record(self._device_id)
 
             elif cmd_id == Commands.VOLUME_UP:
+                _LOG.info("Media Player: Volume up -> VolumeUp")
                 await self._client.send_key(self._device_id, "VolumeUp")
                 
             elif cmd_id == Commands.VOLUME_DOWN:
+                _LOG.info("Media Player: Volume down -> VolumeDown")
                 await self._client.send_key(self._device_id, "VolumeDown")
                 
             elif cmd_id == Commands.MUTE_TOGGLE:
+                _LOG.info("Media Player: Mute toggle -> Mute")
                 await self._client.send_key(self._device_id, "Mute")
                 muted = self.attributes.get(Attributes.MUTED, False)
                 self.attributes[Attributes.MUTED] = not muted
 
             elif cmd_id == Commands.CURSOR_UP:
+                _LOG.info("Media Player: Cursor up -> ArrowUp")
                 await self._client.send_key(self._device_id, "ArrowUp")
                 
             elif cmd_id == Commands.CURSOR_DOWN:
+                _LOG.info("Media Player: Cursor down -> ArrowDown")
                 await self._client.send_key(self._device_id, "ArrowDown")
                 
             elif cmd_id == Commands.CURSOR_LEFT:
+                _LOG.info("Media Player: Cursor left -> ArrowLeft")
                 await self._client.send_key(self._device_id, "ArrowLeft")
                 
             elif cmd_id == Commands.CURSOR_RIGHT:
+                _LOG.info("Media Player: Cursor right -> ArrowRight")
                 await self._client.send_key(self._device_id, "ArrowRight")
                 
             elif cmd_id == Commands.CURSOR_ENTER:
+                _LOG.info("Media Player: Cursor enter -> Ok")
                 await self._client.send_key(self._device_id, "Ok")
 
             elif cmd_id == Commands.HOME:
+                _LOG.info("Media Player: Home -> Home")
                 await self._client.send_key(self._device_id, "Home")
                 
             elif cmd_id == Commands.MENU:
+                _LOG.info("Media Player: Menu -> ContextMenu")
                 await self._client.send_key(self._device_id, "ContextMenu")
                 
             elif cmd_id == Commands.CONTEXT_MENU:
+                _LOG.info("Media Player: Context menu -> Options")
                 await self._client.send_key(self._device_id, "Options")
                 
             elif cmd_id == Commands.GUIDE:
+                _LOG.info("Media Player: Guide -> Guide")
                 await self._client.send_key(self._device_id, "Guide")
                 
             elif cmd_id == Commands.INFO:
+                _LOG.info("Media Player: Info -> Info")
                 await self._client.send_key(self._device_id, "Info")
                 
             elif cmd_id == Commands.BACK:
+                _LOG.info("Media Player: Back -> Back")
                 await self._client.send_key(self._device_id, "Back")
 
             elif cmd_id == Commands.CHANNEL_UP:
+                _LOG.info("Media Player: Channel up")
                 await self._client.next_channel(self._device_id)
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
+                _LOG.info("Media Player: Channel down")
                 await self._client.previous_channel(self._device_id)
                 
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
                     channel = params["source"]
+                    _LOG.info(f"Media Player: Select source (channel {channel})")
                     await self._client.set_channel(self._device_id, channel)
                 else:
                     _LOG.warning("SELECT_SOURCE called without source parameter")
