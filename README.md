@@ -1,4 +1,4 @@
-# European TV Box (LG Horizon STB) Integration for Unfolded Circle REMOTE Two/3
+# European Cable TV Box (LG Horizon STB) Integration for Unfolded Circle REMOTE Two/3
 
 ![lghorizon](https://img.shields.io/badge/lg-horizon-red)
 [![Discord](https://badgen.net/discord/online-members/zGVYf58)](https://discord.gg/zGVYf58)
