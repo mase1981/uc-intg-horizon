@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Horizon Refresh Token Extractor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+            position: relative;
+        }
+
+        .developer-badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .developer-badge::before {
+            content: "👨‍💻";
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+            padding-right: 180px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        .step {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+
+        .step-number {
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 12px;
+        }
+
+        .step-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .step-content {
+            color: #555;
+            line-height: 1.6;
+            margin-left: 44px;
+        }
+
+        .provider-select {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin-top: 10px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .provider-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .login-button {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 10px;
+            transition: background 0.3s;
+        }
+
+        .login-button:hover {
+            background: #5568d3;
+        }
+
+        .manual-method {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .manual-method h3 {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .manual-method ol {
+            margin-left: 20px;
+            color: #856404;
+            line-height: 2;
+        }
+
+        .manual-method li {
+            margin-bottom: 8px;
+        }
+
+        .token-input {
+            width: 100%;
+            padding: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin-top: 15px;
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .token-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .process-button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 16px;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+
+        .process-button:hover {
+            background: #218838;
+        }
+
+        .process-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .token-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            word-break: break-all;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .token-output.show {
+            display: block;
+        }
+
+        .copy-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+
+        .copy-button:hover {
+            background: #5568d3;
+        }
+
+        .copy-button.copied {
+            background: #155724;
+        }
+
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .info-box strong {
+            color: #1976D2;
+        }
+
+        .footer {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 2px solid #e9ecef;
+            text-align: center;
+        }
+
+        .footer-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .developer-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 15px 25px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .developer-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .developer-details {
+            text-align: left;
+        }
+
+        .developer-name {
+            font-weight: 700;
+            color: #333;
+            font-size: 16px;
+            margin-bottom: 2px;
+        }
+
+        .developer-title {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .github-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: #24292e;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+
+        .github-link:hover {
+            background: #1a1e22;
+        }
+
+        .github-icon {
+            width: 20px;
+            height: 20px;
+        }
+
+        .made-with-love {
+            color: #999;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        .made-with-love .heart {
+            color: #e74c3c;
+            animation: heartbeat 1.5s ease-in-out infinite;
+        }
+
+        @keyframes heartbeat {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        @media (max-width: 768px) {
+            .developer-badge {
+                position: static;
+                margin-bottom: 20px;
+                width: fit-content;
+            }
+
+            h1 {
+                padding-right: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="developer-badge">by Meir Miyara</div>
+        
+        <h1>🔑 Horizon Refresh Token Extractor</h1>
+        <p class="subtitle">Get your refresh token in 3 easy steps - no technical knowledge required!</p>
+
+        <!-- Step 1: Select Provider -->
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">1</span>
+                Select Your Provider
+            </div>
+            <div class="step-content">
+                <select id="providerSelect" class="provider-select">
+                    <option value="">Choose your TV provider...</option>
+                    <option value="virginmedia">Virgin Media (UK/Ireland)</option>
+                    <option value="telenet">Telenet (Belgium)</option>
+                    <option value="upc">UPC (Switzerland)</option>
+                    <option value="sunrise">Sunrise (Switzerland)</option>
+                    <option value="ziggo">Ziggo (Netherlands) - Uses Password</option>
+                    <option value="magenta">Magenta (Austria) - Uses Password</option>
+                </select>
+                <div id="passwordNote" class="warning hidden" style="margin-top: 15px;">
+                    ℹ️ <strong>Note:</strong> This provider uses your regular password, not a refresh token. 
+                    You can skip this tool and just use your account password directly in the integration setup.
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Login Instructions -->
+        <div id="step2" class="step hidden">
+            <div class="step-title">
+                <span class="step-number">2</span>
+                Login and Extract Token
+            </div>
+            <div class="step-content">
+                <p>Click the button below to open your provider's login page.</p>
+                <a id="loginLink" href="#" target="_blank" class="login-button">Open Login Page & Sign In</a>
+                
+                <div class="manual-method">
+                    <h3>📝 After Logging In - Follow These Steps:</h3>
+                    <ol>
+                        <li>Press <strong>F12</strong> on your keyboard to open Developer Tools</li>
+                        <li>Click the <strong>Application</strong> tab (Chrome) or <strong>Storage</strong> tab (Firefox)</li>
+                        <li>On the left side, expand <strong>Local Storage</strong></li>
+                        <li>Click on your provider's domain (e.g., virginmedia.com, telenet.be, etc.)</li>
+                        <li>Look for a key containing <strong>"refresh_token"</strong> or <strong>"refreshToken"</strong></li>
+                        <li>Copy the <strong>entire value</strong> (it will be a very long string of letters and numbers)</li>
+                        <li>Paste it in the box below</li>
+                    </ol>
+                </div>
+
+                <div class="info-box">
+                    <strong>💡 Tip:</strong> The token usually starts with "eyJ" and is very long (200+ characters). 
+                    Make sure you copy the entire thing!
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Process Token -->
+        <div id="step3" class="step hidden">
+            <div class="step-title">
+                <span class="step-number">3</span>
+                Process Your Token
+            </div>
+            <div class="step-content">
+                <p>Paste the refresh token you copied here:</p>
+                <textarea id="tokenInput" class="token-input" placeholder="Paste your refresh token here...&#10;&#10;It should look something like:&#10;eyJ0eXAiOiJKV1QiLCJraWQiOiJyZWZyZXNoX3Rva2VuX3VrXzA0XzIwMjMiLCJhbGciOiJIUzI1NiJ9..."></textarea>
+                
+                <button id="processButton" class="process-button">
+                    🔄 Clean & Prepare Token
+                </button>
+
+                <div id="tokenOutput" class="token-output">
+                    <strong>✅ Your Clean Token (Ready to Use):</strong>
+                    <div id="tokenText" style="margin-top: 10px;"></div>
+                </div>
+
+                <button id="copyButton" class="copy-button hidden">
+                    📋 Copy Token to Clipboard
+                </button>
+
+                <div id="successMessage" class="success-message">
+                    ✅ <strong>Token copied!</strong> Now paste it into the Horizon integration setup in the "Password (or Refresh Token)" field.
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Section -->
+        <div class="step" style="margin-top: 30px;">
+            <div class="step-title">❓ Need Help?</div>
+            <div class="step-content">
+                <p><strong>Can't find the token?</strong></p>
+                <ul style="margin-left: 20px; margin-top: 10px; line-height: 1.8;">
+                    <li>Make sure you logged in successfully to your provider's website</li>
+                    <li>Try refreshing the page after logging in, then check Developer Tools again</li>
+                    <li>The token might be under a different key name - look for anything containing "token" or "auth"</li>
+                    <li>Some providers store it in Session Storage instead - check there too</li>
+                </ul>
+                
+                <p style="margin-top: 15px;"><strong>Still stuck?</strong></p>
+                <p>Visit the <a href="https://github.com/mase1981/uc-intg-horizon/issues" target="_blank" style="color: #667eea;">GitHub Issues</a> page for help.</p>
+            </div>
+        </div>
+
+        <!-- Footer with Developer Info -->
+        <div class="footer">
+            <div class="footer-content">
+                <div class="developer-info">
+                    <div class="developer-avatar">👨‍💻</div>
+                    <div class="developer-details">
+                        <div class="developer-name">Meir Miyara</div>
+                        <div class="developer-title">Integration Developer</div>
+                    </div>
+                </div>
+                
+                <a href="https://github.com/mase1981/uc-intg-horizon" target="_blank" class="github-link">
+                    <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    View Project on GitHub
+                </a>
+
+                <div class="made-with-love">
+                    Made with <span class="heart">♥</span> for the Unfolded Circle Community
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const providerUrls = {
+            'virginmedia': 'https://virgintvgo.virginmedia.com/en/home',
+            'telenet': 'https://www.telenet.tv/nl/home',
+            'upc': 'https://www.upc.ch/de/login/',
+            'sunrise': 'https://www.sunrisetv.ch/en/home'
+        };
+
+        const providerSelect = document.getElementById('providerSelect');
+        const step2 = document.getElementById('step2');
+        const step3 = document.getElementById('step3');
+        const loginLink = document.getElementById('loginLink');
+        const tokenInput = document.getElementById('tokenInput');
+        const processButton = document.getElementById('processButton');
+        const copyButton = document.getElementById('copyButton');
+        const tokenOutput = document.getElementById('tokenOutput');
+        const tokenText = document.getElementById('tokenText');
+        const successMessage = document.getElementById('successMessage');
+        const passwordNote = document.getElementById('passwordNote');
+
+        providerSelect.addEventListener('change', function() {
+            const provider = this.value;
+            
+            if (!provider) {
+                step2.classList.add('hidden');
+                step3.classList.add('hidden');
+                passwordNote.classList.add('hidden');
+                return;
+            }
+
+            if (provider === 'ziggo' || provider === 'magenta') {
+                passwordNote.classList.remove('hidden');
+                step2.classList.add('hidden');
+                step3.classList.add('hidden');
+                return;
+            }
+
+            passwordNote.classList.add('hidden');
+            step2.classList.remove('hidden');
+            step3.classList.remove('hidden');
+            
+            loginLink.href = providerUrls[provider];
+        });
+
+        processButton.addEventListener('click', function() {
+            let token = tokenInput.value.trim();
+            
+            if (!token) {
+                alert('❌ Please paste your refresh token first!');
+                return;
+            }
+
+            token = token.replace(/^["']|["']$/g, '');
+            token = token.replace(/\s/g, '');
+            token = token.replace(/^(refreshToken|refresh_token):/i, '');
+            
+            if (token.length < 50) {
+                alert('⚠️ This doesn\'t look like a valid refresh token. Make sure you copied the entire value!');
+                return;
+            }
+
+            tokenText.textContent = token;
+            tokenOutput.classList.add('show');
+            copyButton.classList.remove('hidden');
+            processButton.textContent = '✅ Token Processed!';
+            processButton.disabled = true;
+        });
+
+        copyButton.addEventListener('click', function() {
+            const token = tokenText.textContent;
+            
+            navigator.clipboard.writeText(token).then(function() {
+                copyButton.textContent = '✅ Copied!';
+                copyButton.classList.add('copied');
+                successMessage.classList.add('show');
+                
+                setTimeout(function() {
+                    copyButton.textContent = '📋 Copy Token to Clipboard';
+                    copyButton.classList.remove('copied');
+                }, 3000);
+            }).catch(function(err) {
+                const textArea = document.createElement('textarea');
+                textArea.value = token;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    copyButton.textContent = '✅ Copied!';
+                    successMessage.classList.add('show');
+                } catch (err) {
+                    alert('Failed to copy. Please manually select and copy the token above.');
+                }
+                document.body.removeChild(textArea);
+            });
+        });
+
+        tokenInput.addEventListener('input', function() {
+            if (this.value.trim()) {
+                processButton.disabled = false;
+                processButton.textContent = '🔄 Clean & Prepare Token';
+            }
+        });
+    </script>
+</body>
+</html>

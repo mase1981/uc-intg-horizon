@@ -1,4 +1,4 @@
-# European Cable TV Box (LG Horizon STB) Integration for Unfolded Circle REMOTE Two/3
+# LG Horizon Integration for Unfolded Circle Remote
 
 ![lghorizon](https://img.shields.io/badge/lg-horizon-red)
 [![Discord](https://badgen.net/discord/online-members/zGVYf58)](https://discord.gg/zGVYf58)
@@ -123,25 +123,55 @@ python uc_intg_horizon/driver.py
 
 ### Step 1: Obtain Your Credentials
 
-#### 🔑 For Virgin Media (UK/IE), Telenet (BE), UPC (CH) - Refresh Token Required
+#### 🔑 Easy Token Extraction Tool (Recommended)
 
-These providers require a **refresh token** instead of a password:
+We've created a **simple tool** to help you extract your refresh token - no technical knowledge required!
 
-1. Open your browser's **Developer Tools** (press `F12`)
-2. Go to the **Network** tab
-3. Log in to your provider's website
-4. Look for API requests to domains containing `horizon.tv`
-5. Find the response containing `refresh_token`
-6. Copy the entire refresh token string (long alphanumeric value)
+**Download and Use the Token Extractor:**
 
-**Example locations:**
-- Virgin Media: https://www.virginmedia.com/
-- Telenet: https://www.telenet.be/
-- UPC: https://www.upc.ch/
+1. Download [`get_horizon_token.html`](https://github.com/mase1981/uc-intg-horizon/raw/main/get_horizon_token.html) from the repository
+2. Open the file in any web browser (Chrome, Firefox, Edge, Safari)
+3. Follow the 3-step wizard:
+   - **Step 1**: Select your provider from the dropdown
+   - **Step 2**: Click to open login page and sign in with your credentials
+   - **Step 3**: Paste your token and click "Clean & Prepare Token"
+4. Click "Copy Token to Clipboard"
+5. Use the cleaned token in the integration setup below
 
-#### 🔑 For Ziggo (NL), Sunrise (CH), Magenta (AT) - Password
+**The tool automatically:**
+- ✅ Opens the correct login page for your provider
+- ✅ Provides clear step-by-step instructions
+- ✅ Cleans and validates your token
+- ✅ Removes quotes, whitespace, and prefixes
+- ✅ Gives you a ready-to-paste token
 
-Use your standard account **username** and **password**.
+#### 🔑 Provider Requirements
+
+**For Virgin Media (UK/IE), Telenet (BE), UPC (CH), Sunrise (CH):**
+- These providers require a **refresh token**
+- Use the Token Extractor Tool above - it will guide you through the process
+
+**For Ziggo (NL), Magenta (AT):**
+- These providers use your regular account **password**
+- No token extraction needed - just use your password directly in Step 2 below
+
+#### 🔑 Manual Token Extraction (Advanced Users)
+
+If you prefer to extract the token manually without the tool:
+
+1. Open your provider's website and log in:
+   - **Virgin Media**: https://virgintvgo.virginmedia.com/en/home
+   - **Telenet**: https://www.telenet.tv/nl/home
+   - **UPC**: https://www.upc.ch/de/login/
+   - **Sunrise**: https://www.sunrisetv.ch/en/home
+2. Press **F12** to open Developer Tools
+3. Go to **Application** tab (Chrome) or **Storage** tab (Firefox)
+4. Expand **Local Storage** on the left sidebar
+5. Click on your provider's domain
+6. Look for a key named `refresh_token` or `refreshToken`
+7. Copy the entire value (long alphanumeric string, usually starts with "eyJ")
+8. Remove any quotes or whitespace from the token before using it
+
 
 ### Step 2: Setup in Remote Configurator
 
