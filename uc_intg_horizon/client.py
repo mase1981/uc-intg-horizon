@@ -45,7 +45,6 @@ COMMON_APPS = [
 
 
 class HorizonClient:
-    """Client for communicating with Horizon set-top boxes via lghorizon library."""
 
     def __init__(self, provider: str, username: str, password: str):
         self.provider = provider
@@ -100,26 +99,42 @@ class HorizonClient:
             self._connected = False
             return False
 
-    async def _wait_for_mqtt_ready(self, timeout: int = 30, check_interval: float = 0.5):
+
+    async def _wait_for_mqtt_ready(self, timeout: int = 15, check_interval: float = 0.5):
         if not self._api:
             return
         
         elapsed = 0
-        max_wait = timeout
-        
         _LOG.debug("Waiting for devices to register on MQTT...")
         
-        while elapsed < max_wait:
+        while elapsed < timeout:
             if hasattr(self._api, 'settop_boxes') and len(self._api.settop_boxes) > 0:
-                all_ready = True
-                for device_id, box in self._api.settop_boxes.items():
-                    if not hasattr(box, 'state') or box.state is None:
-                        all_ready = False
-                        _LOG.debug(f"Device {device_id} not ready yet (no state)")
-                        break
+                total_devices = len(self._api.settop_boxes)
+                ready_devices = 0
+                online_devices = 0
+                offline_devices = 0
+                pending_devices = []
                 
-                if all_ready:
-                    _LOG.info(f"All {len(self._api.settop_boxes)} devices registered and ready")
+                for device_id, box in self._api.settop_boxes.items():
+                    if hasattr(box, 'state') and box.state is not None:
+                        ready_devices += 1
+                        if box.state == 'OFFLINE':
+                            offline_devices += 1
+                            _LOG.debug(f"Device {device_id} is OFFLINE")
+                        else:
+                            online_devices += 1
+                            _LOG.debug(f"Device {device_id} is {box.state}")
+                    else:
+                        pending_devices.append(device_id)
+                        _LOG.debug(f"Device {device_id} not ready yet (no state)")
+                
+                if ready_devices > 0:
+                    _LOG.info(
+                        f"✓ MQTT ready: {ready_devices}/{total_devices} devices reported state "
+                        f"({online_devices} online, {offline_devices} offline)"
+                    )
+                    if pending_devices:
+                        _LOG.info(f"Proceeding with {len(pending_devices)} devices still pending: {pending_devices}")
                     return
             
             await asyncio.sleep(check_interval)
@@ -127,14 +142,21 @@ class HorizonClient:
             
             if int(elapsed) % 5 == 0:
                 device_count = len(self._api.settop_boxes) if hasattr(self._api, 'settop_boxes') else 0
-                _LOG.debug(f"Still waiting for MQTT ready... ({elapsed}s elapsed, {device_count} devices found)")
+                _LOG.debug(f"Still waiting for MQTT ready... ({elapsed:.1f}s elapsed, {device_count} devices found)")
         
         device_count = len(self._api.settop_boxes) if hasattr(self._api, 'settop_boxes') else 0
         if device_count > 0:
-            _LOG.warning(f"MQTT ready timeout after {timeout}s, but found {device_count} devices - proceeding anyway")
+            ready_count = sum(
+                1 for box in self._api.settop_boxes.values() 
+                if hasattr(box, 'state') and box.state is not None
+            )
+            _LOG.warning(
+                f"⚠️ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
+                f"devices ready - proceeding anyway (some devices may be offline/slow)"
+            )
         else:
-            _LOG.error(f"MQTT ready timeout after {timeout}s with no devices found")
-            raise TimeoutError(f"MQTT connection not ready after {timeout}s")
+            _LOG.error(f"✗ MQTT ready timeout after {timeout}s with NO devices found")
+            raise TimeoutError(f"MQTT connection not ready after {timeout}s - no devices discovered")
 
     async def disconnect(self) -> None:
         try:
