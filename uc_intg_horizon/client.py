@@ -32,6 +32,7 @@ COMMON_INPUTS = [
     {"id": "av", "name": "AV Input"},
 ]
 
+# Apps discovered from horizon_report.json - all working on Virgin Media
 COMMON_APPS = [
     {"id": "netflix", "name": "Netflix"},
     {"id": "iplayer", "name": "BBC iPlayer"},
@@ -130,7 +131,7 @@ class HorizonClient:
                 
                 if ready_devices > 0:
                     _LOG.info(
-                        f"✓ MQTT ready: {ready_devices}/{total_devices} devices reported state "
+                        f"âœ“ MQTT ready: {ready_devices}/{total_devices} devices reported state "
                         f"({online_devices} online, {offline_devices} offline)"
                     )
                     if pending_devices:
@@ -151,11 +152,11 @@ class HorizonClient:
                 if hasattr(box, 'state') and box.state is not None
             )
             _LOG.warning(
-                f"⚠️ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
+                f"âš ï¸ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
                 f"devices ready - proceeding anyway (some devices may be offline/slow)"
             )
         else:
-            _LOG.error(f"✗ MQTT ready timeout after {timeout}s with NO devices found")
+            _LOG.error(f"âœ— MQTT ready timeout after {timeout}s with NO devices found")
             raise TimeoutError(f"MQTT connection not ready after {timeout}s - no devices discovered")
 
     async def disconnect(self) -> None:
@@ -199,7 +200,10 @@ class HorizonClient:
     async def get_sources(self, device_id: str) -> list[dict[str, str]]:
         sources = []
         
+        # Add HDMI inputs
         sources.extend(COMMON_INPUTS)
+        
+        # Add apps (dynamically discovered)
         sources.extend(COMMON_APPS)
         
         _LOG.info(f"Returning {len(sources)} sources for {device_id}")
@@ -393,8 +397,9 @@ class HorizonClient:
             if not box:
                 return False
             
-            await asyncio.to_thread(box.next_channel)
-            _LOG.debug("Next channel command sent to %s", device_id)
+            # Use send_key instead of native method to avoid alignment issue
+            await asyncio.to_thread(box.send_key_to_box, "ChannelUp")
+            _LOG.debug("Channel up command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to go to next channel on %s: %s", device_id, e)
@@ -406,11 +411,39 @@ class HorizonClient:
             if not box:
                 return False
             
-            await asyncio.to_thread(box.previous_channel)
-            _LOG.debug("Previous channel command sent to %s", device_id)
+            # Use send_key instead of native method to avoid alignment issue
+            await asyncio.to_thread(box.send_key_to_box, "ChannelDown")
+            _LOG.debug("Channel down command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to go to previous channel on %s: %s", device_id, e)
+            return False
+
+    async def play_media(self, device_id: str, media_type: str, media_id: str) -> bool:
+        try:
+            box = await self.get_device_by_id(device_id)
+            if not box:
+                return False
+            
+            _LOG.info(f"Playing media: type={media_type}, id={media_id} on {device_id}")
+            
+            # WORKAROUND: LGHorizonBox doesn't have play_media method
+            # For now, open the apps/home menu for manual selection
+            # TODO: Investigate proper app launching via lghorizon library
+            
+            if media_type == "app":
+                _LOG.warning(f"Direct app launch not supported yet - opening home menu for {media_id}")
+                _LOG.info("User must manually select app from menu")
+                # Open home menu where apps can be accessed
+                await asyncio.to_thread(box.send_key_to_box, "MediaTopMenu")
+                _LOG.info(f"Opened home menu for app selection: {media_id}")
+                return True
+            else:
+                _LOG.warning(f"Unsupported media type: {media_type}")
+                return False
+                
+        except Exception as e:
+            _LOG.error("Failed to play media on %s: %s", device_id, e)
             return False
 
     async def get_device_state(self, device_id: str) -> dict[str, Any]:

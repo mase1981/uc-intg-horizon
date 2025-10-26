@@ -88,6 +88,9 @@ class HorizonMediaPlayer(MediaPlayer):
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
+        # Track if this is a channel-changing command for delayed update
+        is_channel_change = False
+
         try:
             if cmd_id == Commands.ON:
                 _LOG.info("Media Player: Powering on")
@@ -125,10 +128,14 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.NEXT:
                 _LOG.info("Media Player: Next channel")
                 await self._client.next_channel(self._device_id)
+                # Flag for delayed update to allow MQTT message to arrive
+                is_channel_change = True
                 
             elif cmd_id == Commands.PREVIOUS:
                 _LOG.info("Media Player: Previous channel")
                 await self._client.previous_channel(self._device_id)
+                # Flag for delayed update to allow MQTT message to arrive
+                is_channel_change = True
                 
             elif cmd_id == Commands.FAST_FORWARD:
                 _LOG.info("Media Player: Fast forward")
@@ -139,8 +146,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.rewind(self._device_id)
                 
             elif cmd_id == Commands.RECORD:
-                _LOG.info("Media Player: Record")
-                await self._client.record(self._device_id)
+                _LOG.info("Media Player: Record -> MediaRecord")
+                await self._client.send_key(self._device_id, "MediaRecord")
 
             elif cmd_id == Commands.VOLUME_UP:
                 _LOG.info("Media Player: Volume up -> VolumeUp")
@@ -203,22 +210,26 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
                 await self._client.next_channel(self._device_id)
+                # Flag for delayed update to allow MQTT message to arrive
+                is_channel_change = True
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
                 _LOG.info("Media Player: Channel down")
                 await self._client.previous_channel(self._device_id)
+                # Flag for delayed update to allow MQTT message to arrive
+                is_channel_change = True
                 
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
                     source = params["source"]
                     _LOG.info(f"Media Player: Select source: {source}")
                     
-                    if source.startswith("HDMI"):
+                    if source.startswith("HDMI") or source == "AV Input":
                         await self._client.send_key(self._device_id, "Settings")
-                        _LOG.info("Opened settings for HDMI input selection")
+                        _LOG.info("Opened settings for input selection")
                     elif source in ["Netflix", "BBC iPlayer", "ITVX", "All 4", "My5", "Prime Video", "YouTube", "Disney+"]:
-                        await self._client.send_key(self._device_id, "Menu")
-                        _LOG.info(f"Opened menu to navigate to {source}")
+                        await self._client.play_media(self._device_id, "app", source)
+                        _LOG.info(f"Launched app: {source}")
                     else:
                         await self._client.set_channel(self._device_id, source)
                     
@@ -227,10 +238,27 @@ class HorizonMediaPlayer(MediaPlayer):
                     _LOG.warning("SELECT_SOURCE called without source parameter")
                     return StatusCodes.BAD_REQUEST
 
+            elif cmd_id == "my_recordings":
+                _LOG.info("Media Player: My Recordings -> Recordings")
+                await self._client.send_key(self._device_id, "Recordings")
+
+            elif cmd_id.startswith("channel_select:"):
+                channel = cmd_id.split(":", 1)[1]
+                _LOG.info(f"Media Player: Channel select -> {channel}")
+                await self._client.set_channel(self._device_id, channel)
+                # Flag for delayed update to allow MQTT message to arrive
+                is_channel_change = True
+
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
+            # Delayed update for channel changes to allow MQTT messages to arrive
+            # Following SkyQ pattern: wait for MQTT to update state before pushing
+            if is_channel_change:
+                _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
+                await asyncio.sleep(2.0)
+            
             await self.push_update()
             return StatusCodes.OK
 

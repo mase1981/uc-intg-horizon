@@ -211,6 +211,12 @@ class HorizonRemote(Remote):
     async def _send_simple_command(self, command: str) -> None:
         _LOG.info(f"Processing simple command: {command}")
         
+        if command.startswith("channel_select:"):
+            channel = command.split(":", 1)[1]
+            _LOG.info(f"Channel select command: {channel}")
+            await self._client.set_channel(self._device_id, channel)
+            return
+        
         if command == "POWER_ON":
             _LOG.info("Calling power_on()")
             await self._client.power_on(self._device_id)
@@ -231,6 +237,11 @@ class HorizonRemote(Remote):
             await self._client.play_pause_toggle(self._device_id)
             return
         
+        elif command == "RECORD":
+            _LOG.info("Sending MediaRecord key")
+            await self._client.send_key(self._device_id, "MediaRecord")
+            return
+        
         command_map = {
             "UP": "ArrowUp",
             "DOWN": "ArrowDown",
@@ -239,7 +250,6 @@ class HorizonRemote(Remote):
             "SELECT": "Enter",
             "BACK": "Escape",
             "STOP": "MediaStop",
-            "RECORD": "MediaRecord",
             "REWIND": "MediaRewind",
             "FASTFORWARD": "MediaFastForward",
             "VOLUME_UP": "VolumeUp",
