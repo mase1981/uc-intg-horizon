@@ -46,7 +46,7 @@ class HorizonRemote(Remote):
             "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
             "RED", "GREEN", "YELLOW", "BLUE",
-            "HOME", "TV", "MENU",
+            "HOME", "TV", "MENU", "SOURCE",
         ]
 
         button_mapping = [
