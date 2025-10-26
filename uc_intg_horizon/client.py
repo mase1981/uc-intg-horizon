@@ -131,7 +131,7 @@ class HorizonClient:
                 
                 if ready_devices > 0:
                     _LOG.info(
-                        f"✓ MQTT ready: {ready_devices}/{total_devices} devices reported state "
+                        f"âœ“ MQTT ready: {ready_devices}/{total_devices} devices reported state "
                         f"({online_devices} online, {offline_devices} offline)"
                     )
                     if pending_devices:
@@ -152,11 +152,11 @@ class HorizonClient:
                 if hasattr(box, 'state') and box.state is not None
             )
             _LOG.warning(
-                f"⚠️ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
+                f"âš ï¸ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
                 f"devices ready - proceeding anyway (some devices may be offline/slow)"
             )
         else:
-            _LOG.error(f"✗ MQTT ready timeout after {timeout}s with NO devices found")
+            _LOG.error(f"âœ— MQTT ready timeout after {timeout}s with NO devices found")
             raise TimeoutError(f"MQTT connection not ready after {timeout}s - no devices discovered")
 
     async def disconnect(self) -> None:
@@ -199,58 +199,14 @@ class HorizonClient:
 
     async def get_sources(self, device_id: str) -> list[dict[str, str]]:
         sources = []
-<<<<<<< HEAD
         
         # Add HDMI inputs
         sources.extend(COMMON_INPUTS)
         
         # Add apps (dynamically discovered)
         sources.extend(COMMON_APPS)
-=======
-        sources.extend(COMMON_INPUTS)
->>>>>>> 886463107abcb5fb7d17afc20c91017e5ab68145
         
-        try:
-            box = await self.get_device_by_id(device_id)
-            if box:
-                _LOG.info(f"Attempting to discover available apps for {device_id}")
-                _LOG.debug(f"Box object attributes: {dir(box)}")
-                
-                discovered_apps = []
-                
-                if hasattr(box, 'channels_json') and box.channels_json:
-                    _LOG.info("Found channels_json attribute, scanning for apps...")
-                    channels = box.channels_json.get('channels', [])
-                    for channel in channels:
-                        if 'boundApps' in channel and channel.get('boundApps'):
-                            app_name = channel.get('name', 'Unknown')
-                            discovered_apps.append({"id": app_name.lower(), "name": app_name})
-                            _LOG.info(f"Discovered app: {app_name}")
-                
-                if hasattr(box, 'apps') and box.apps:
-                    _LOG.info("Found apps attribute")
-                    discovered_apps.extend([{"id": app.lower(), "name": app} for app in box.apps])
-                
-                if hasattr(box, 'available_apps') and box.available_apps:
-                    _LOG.info("Found available_apps attribute")
-                    discovered_apps.extend([{"id": app.lower(), "name": app} for app in box.available_apps])
-                
-                if discovered_apps:
-                    _LOG.info(f"Using {len(discovered_apps)} dynamically discovered apps")
-                    sources.extend(discovered_apps)
-                else:
-                    _LOG.info(f"No dynamic apps found, using static list of {len(COMMON_APPS)} apps")
-                    sources.extend(COMMON_APPS)
-            else:
-                _LOG.warning(f"Box not found for {device_id}, using static app list")
-                sources.extend(COMMON_APPS)
-                
-        except Exception as e:
-            _LOG.error(f"Error discovering apps: {e}", exc_info=True)
-            _LOG.info("Falling back to static app list")
-            sources.extend(COMMON_APPS)
-        
-        _LOG.info(f"Returning {len(sources)} total sources for {device_id}")
+        _LOG.info(f"Returning {len(sources)} sources for {device_id}")
         return sources
 
     async def send_key(self, device_id: str, key: str) -> bool:
@@ -298,26 +254,6 @@ class HorizonClient:
             _LOG.error("Failed to set channel %s on %s: %s", channel_number, device_id, e)
             return False
 
-<<<<<<< HEAD
-=======
-    async def play_media(self, device_id: str, media_type: str, media_id: str) -> bool:
-        try:
-            box = await self.get_device_by_id(device_id)
-            if not box:
-                _LOG.warning(f"Device not found: {device_id}")
-                return False
-            
-            _LOG.info(f"Calling box.play_media('{media_type}', '{media_id}') for device {device_id}")
-            await asyncio.to_thread(box.play_media, media_type, media_id)
-            _LOG.info(f"play_media() completed successfully for {device_id}")
-            return True
-            
-        except Exception as e:
-            _LOG.error("play_media() failed on %s (type=%s, id=%s): %s", 
-                      device_id, media_type, media_id, e, exc_info=True)
-            return False
-
->>>>>>> 886463107abcb5fb7d17afc20c91017e5ab68145
     async def power_on(self, device_id: str) -> bool:
         try:
             box = await self.get_device_by_id(device_id)
@@ -490,9 +426,22 @@ class HorizonClient:
                 return False
             
             _LOG.info(f"Playing media: type={media_type}, id={media_id} on {device_id}")
-            await asyncio.to_thread(box.play_media, media_type, media_id)
-            _LOG.info(f"Successfully launched {media_id}")
-            return True
+            
+            # WORKAROUND: LGHorizonBox doesn't have play_media method
+            # For now, open the apps/home menu for manual selection
+            # TODO: Investigate proper app launching via lghorizon library
+            
+            if media_type == "app":
+                _LOG.warning(f"Direct app launch not supported yet - opening home menu for {media_id}")
+                _LOG.info("User must manually select app from menu")
+                # Open home menu where apps can be accessed
+                await asyncio.to_thread(box.send_key_to_box, "MediaTopMenu")
+                _LOG.info(f"Opened home menu for app selection: {media_id}")
+                return True
+            else:
+                _LOG.warning(f"Unsupported media type: {media_type}")
+                return False
+                
         except Exception as e:
             _LOG.error("Failed to play media on %s: %s", device_id, e)
             return False
