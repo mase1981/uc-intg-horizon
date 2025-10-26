@@ -25,7 +25,6 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonRemote(Remote):
-    """Horizon Remote Control entity implementation."""
 
     def __init__(
         self,
@@ -137,7 +136,6 @@ class HorizonRemote(Remote):
         
         page.add(create_ui_icon("uc:up-arrow", 3, 1, cmd="CHANNEL_UP"))
         page.add(create_ui_icon("uc:down-arrow", 3, 2, cmd="CHANNEL_DOWN"))
-        page.add(create_ui_text("OK", 0, 5, size=Size(2, 1), cmd="SELECT"))
         
         return page
 
@@ -210,6 +208,12 @@ class HorizonRemote(Remote):
 
     async def _send_simple_command(self, command: str) -> None:
         _LOG.info(f"Processing simple command: {command}")
+        
+        if command.startswith("channel_select:"):
+            channel = command.split(":", 1)[1]
+            _LOG.info(f"Channel select command: {channel}")
+            await self._client.set_channel(self._device_id, channel)
+            return
         
         if command == "POWER_ON":
             _LOG.info("Calling power_on()")

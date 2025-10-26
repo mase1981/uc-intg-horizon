@@ -240,14 +240,28 @@ class HorizonClient:
                 await asyncio.to_thread(box.send_key_to_box, digit)
                 await asyncio.sleep(0.3)
             
-            await asyncio.sleep(0.5)
-            await asyncio.to_thread(box.send_key_to_box, "Ok")
-            
-            _LOG.info(f"Successfully set channel to {channel_str} on {device_id}")
+            _LOG.info(f"Successfully sent channel digits {channel_str} to {device_id}")
             return True
             
         except Exception as e:
             _LOG.error("Failed to set channel %s on %s: %s", channel_number, device_id, e)
+            return False
+
+    async def play_media(self, device_id: str, media_type: str, media_id: str) -> bool:
+        try:
+            box = await self.get_device_by_id(device_id)
+            if not box:
+                _LOG.warning(f"Device not found: {device_id}")
+                return False
+            
+            _LOG.info(f"Playing media on {device_id}: type={media_type}, id={media_id}")
+            await asyncio.to_thread(box.play_media, media_type, media_id)
+            _LOG.info(f"Successfully started media playback on {device_id}")
+            return True
+            
+        except Exception as e:
+            _LOG.error("Failed to play media on %s (type=%s, id=%s): %s", 
+                      device_id, media_type, media_id, e)
             return False
 
     async def power_on(self, device_id: str) -> bool:

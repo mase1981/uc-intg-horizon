@@ -18,7 +18,6 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonMediaPlayer(MediaPlayer):
-    """Horizon Media Player entity implementation."""
 
     def __init__(
         self,
@@ -213,12 +212,12 @@ class HorizonMediaPlayer(MediaPlayer):
                     source = params["source"]
                     _LOG.info(f"Media Player: Select source: {source}")
                     
-                    if source.startswith("HDMI"):
+                    if source.startswith("HDMI") or source == "AV Input":
                         await self._client.send_key(self._device_id, "Settings")
-                        _LOG.info("Opened settings for HDMI input selection")
+                        _LOG.info("Opened settings for input selection")
                     elif source in ["Netflix", "BBC iPlayer", "ITVX", "All 4", "My5", "Prime Video", "YouTube", "Disney+"]:
-                        await self._client.send_key(self._device_id, "Menu")
-                        _LOG.info(f"Opened menu to navigate to {source}")
+                        await self._client.play_media(self._device_id, "app", source)
+                        _LOG.info(f"Launched app: {source}")
                     else:
                         await self._client.set_channel(self._device_id, source)
                     
@@ -226,6 +225,19 @@ class HorizonMediaPlayer(MediaPlayer):
                 else:
                     _LOG.warning("SELECT_SOURCE called without source parameter")
                     return StatusCodes.BAD_REQUEST
+
+            elif cmd_id == "my_recordings":
+                _LOG.info("Media Player: My Recordings -> Recordings")
+                await self._client.send_key(self._device_id, "Recordings")
+
+            elif cmd_id == "live":
+                _LOG.info("Media Player: Live -> TV")
+                await self._client.send_key(self._device_id, "TV")
+
+            elif cmd_id.startswith("channel_select:"):
+                channel = cmd_id.split(":", 1)[1]
+                _LOG.info(f"Media Player: Channel select -> {channel}")
+                await self._client.set_channel(self._device_id, channel)
 
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
