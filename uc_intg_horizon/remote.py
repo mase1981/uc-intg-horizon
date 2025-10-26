@@ -25,6 +25,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonRemote(Remote):
+    """Horizon Remote Control entity implementation."""
 
     def __init__(
         self,
@@ -45,7 +46,7 @@ class HorizonRemote(Remote):
             "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
             "RED", "GREEN", "YELLOW", "BLUE",
-            "HOME", "TV", "MENU", "SOURCE",
+            "HOME", "TV", "MENU",
         ]
 
         button_mapping = [
@@ -136,6 +137,7 @@ class HorizonRemote(Remote):
         
         page.add(create_ui_icon("uc:up-arrow", 3, 1, cmd="CHANNEL_UP"))
         page.add(create_ui_icon("uc:down-arrow", 3, 2, cmd="CHANNEL_DOWN"))
+        page.add(create_ui_text("OK", 0, 5, size=Size(2, 1), cmd="SELECT"))
         
         return page
 
@@ -235,6 +237,11 @@ class HorizonRemote(Remote):
             await self._client.play_pause_toggle(self._device_id)
             return
         
+        elif command == "RECORD":
+            _LOG.info("Sending MediaRecord key")
+            await self._client.send_key(self._device_id, "MediaRecord")
+            return
+        
         command_map = {
             "UP": "ArrowUp",
             "DOWN": "ArrowDown",
@@ -243,7 +250,6 @@ class HorizonRemote(Remote):
             "SELECT": "Enter",
             "BACK": "Escape",
             "STOP": "MediaStop",
-            "RECORD": "MediaRecord",
             "REWIND": "MediaRewind",
             "FASTFORWARD": "MediaFastForward",
             "VOLUME_UP": "VolumeUp",

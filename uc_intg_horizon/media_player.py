@@ -18,6 +18,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonMediaPlayer(MediaPlayer):
+    """Horizon Media Player entity implementation."""
 
     def __init__(
         self,
@@ -138,8 +139,8 @@ class HorizonMediaPlayer(MediaPlayer):
                 await self._client.rewind(self._device_id)
                 
             elif cmd_id == Commands.RECORD:
-                _LOG.info("Media Player: Record")
-                await self._client.record(self._device_id)
+                _LOG.info("Media Player: Record -> MediaRecord")
+                await self._client.send_key(self._device_id, "MediaRecord")
 
             elif cmd_id == Commands.VOLUME_UP:
                 _LOG.info("Media Player: Volume up -> VolumeUp")
@@ -229,10 +230,6 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == "my_recordings":
                 _LOG.info("Media Player: My Recordings -> Recordings")
                 await self._client.send_key(self._device_id, "Recordings")
-
-            elif cmd_id == "live":
-                _LOG.info("Media Player: Live -> TV")
-                await self._client.send_key(self._device_id, "TV")
 
             elif cmd_id.startswith("channel_select:"):
                 channel = cmd_id.split(":", 1)[1]

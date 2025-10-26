@@ -32,6 +32,7 @@ COMMON_INPUTS = [
     {"id": "av", "name": "AV Input"},
 ]
 
+# Apps discovered from horizon_report.json - all working on Virgin Media
 COMMON_APPS = [
     {"id": "netflix", "name": "Netflix"},
     {"id": "iplayer", "name": "BBC iPlayer"},
@@ -199,7 +200,10 @@ class HorizonClient:
     async def get_sources(self, device_id: str) -> list[dict[str, str]]:
         sources = []
         
+        # Add HDMI inputs
         sources.extend(COMMON_INPUTS)
+        
+        # Add apps (dynamically discovered)
         sources.extend(COMMON_APPS)
         
         _LOG.info(f"Returning {len(sources)} sources for {device_id}")
@@ -240,28 +244,14 @@ class HorizonClient:
                 await asyncio.to_thread(box.send_key_to_box, digit)
                 await asyncio.sleep(0.3)
             
-            _LOG.info(f"Successfully sent channel digits {channel_str} to {device_id}")
+            await asyncio.sleep(0.5)
+            await asyncio.to_thread(box.send_key_to_box, "Ok")
+            
+            _LOG.info(f"Successfully set channel to {channel_str} on {device_id}")
             return True
             
         except Exception as e:
             _LOG.error("Failed to set channel %s on %s: %s", channel_number, device_id, e)
-            return False
-
-    async def play_media(self, device_id: str, media_type: str, media_id: str) -> bool:
-        try:
-            box = await self.get_device_by_id(device_id)
-            if not box:
-                _LOG.warning(f"Device not found: {device_id}")
-                return False
-            
-            _LOG.info(f"Playing media on {device_id}: type={media_type}, id={media_id}")
-            await asyncio.to_thread(box.play_media, media_type, media_id)
-            _LOG.info(f"Successfully started media playback on {device_id}")
-            return True
-            
-        except Exception as e:
-            _LOG.error("Failed to play media on %s (type=%s, id=%s): %s", 
-                      device_id, media_type, media_id, e)
             return False
 
     async def power_on(self, device_id: str) -> bool:
@@ -407,8 +397,9 @@ class HorizonClient:
             if not box:
                 return False
             
-            await asyncio.to_thread(box.next_channel)
-            _LOG.debug("Next channel command sent to %s", device_id)
+            # Use send_key instead of native method to avoid alignment issue
+            await asyncio.to_thread(box.send_key_to_box, "ChannelUp")
+            _LOG.debug("Channel up command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to go to next channel on %s: %s", device_id, e)
@@ -420,11 +411,26 @@ class HorizonClient:
             if not box:
                 return False
             
-            await asyncio.to_thread(box.previous_channel)
-            _LOG.debug("Previous channel command sent to %s", device_id)
+            # Use send_key instead of native method to avoid alignment issue
+            await asyncio.to_thread(box.send_key_to_box, "ChannelDown")
+            _LOG.debug("Channel down command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to go to previous channel on %s: %s", device_id, e)
+            return False
+
+    async def play_media(self, device_id: str, media_type: str, media_id: str) -> bool:
+        try:
+            box = await self.get_device_by_id(device_id)
+            if not box:
+                return False
+            
+            _LOG.info(f"Playing media: type={media_type}, id={media_id} on {device_id}")
+            await asyncio.to_thread(box.play_media, media_type, media_id)
+            _LOG.info(f"Successfully launched {media_id}")
+            return True
+        except Exception as e:
+            _LOG.error("Failed to play media on %s: %s", device_id, e)
             return False
 
     async def get_device_state(self, device_id: str) -> dict[str, Any]:
