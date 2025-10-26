@@ -91,43 +91,32 @@ class HorizonMediaPlayer(MediaPlayer):
             if cmd_id == Commands.ON:
                 _LOG.info("Media Player: Powering on")
                 await self._client.power_on(self._device_id)
-                self.attributes[Attributes.STATE] = States.ON
                 
             elif cmd_id == Commands.OFF:
                 _LOG.info("Media Player: Powering off")
                 await self._client.power_off(self._device_id)
-                self.attributes[Attributes.STATE] = States.STANDBY
                 
             elif cmd_id == Commands.TOGGLE:
                 _LOG.info("Media Player: Toggling power")
                 await self._client.power_toggle(self._device_id)
-                current_state = self.attributes.get(Attributes.STATE)
-                if current_state in [States.ON, States.PLAYING, States.PAUSED]:
-                    self.attributes[Attributes.STATE] = States.STANDBY
-                else:
-                    self.attributes[Attributes.STATE] = States.ON
 
             elif cmd_id == Commands.PLAY_PAUSE:
                 _LOG.info("Media Player: Play/Pause toggle")
                 await self._client.play_pause_toggle(self._device_id)
-                current_state = self.attributes.get(Attributes.STATE)
-                if current_state == States.PLAYING:
-                    self.attributes[Attributes.STATE] = States.PAUSED
-                else:
-                    self.attributes[Attributes.STATE] = States.PLAYING
                 
             elif cmd_id == Commands.STOP:
                 _LOG.info("Media Player: Stop")
                 await self._client.stop(self._device_id)
-                self.attributes[Attributes.STATE] = States.ON
                 
             elif cmd_id == Commands.NEXT:
                 _LOG.info("Media Player: Next channel")
                 await self._client.next_channel(self._device_id)
+                return StatusCodes.OK
                 
             elif cmd_id == Commands.PREVIOUS:
                 _LOG.info("Media Player: Previous channel")
                 await self._client.previous_channel(self._device_id)
+                return StatusCodes.OK
                 
             elif cmd_id == Commands.FAST_FORWARD:
                 _LOG.info("Media Player: Fast forward")
@@ -202,10 +191,12 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
                 await self._client.next_channel(self._device_id)
+                return StatusCodes.OK
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
                 _LOG.info("Media Player: Channel down")
                 await self._client.previous_channel(self._device_id)
+                return StatusCodes.OK
                 
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
@@ -216,8 +207,9 @@ class HorizonMediaPlayer(MediaPlayer):
                         await self._client.send_key(self._device_id, "Settings")
                         _LOG.info("Opened settings for input selection")
                     elif source in ["Netflix", "BBC iPlayer", "ITVX", "All 4", "My5", "Prime Video", "YouTube", "Disney+"]:
+                        _LOG.info(f"Launching app via play_media: {source}")
                         await self._client.play_media(self._device_id, "app", source)
-                        _LOG.info(f"Launched app: {source}")
+                        _LOG.info(f"play_media call completed for app: {source}")
                     else:
                         await self._client.set_channel(self._device_id, source)
                     
@@ -227,12 +219,8 @@ class HorizonMediaPlayer(MediaPlayer):
                     return StatusCodes.BAD_REQUEST
 
             elif cmd_id == "my_recordings":
-                _LOG.info("Media Player: My Recordings -> Recordings")
-                await self._client.send_key(self._device_id, "Recordings")
-
-            elif cmd_id == "live":
-                _LOG.info("Media Player: Live -> TV")
-                await self._client.send_key(self._device_id, "TV")
+                _LOG.info("Media Player: My Recordings -> MediaRecord")
+                await self._client.send_key(self._device_id, "MediaRecord")
 
             elif cmd_id.startswith("channel_select:"):
                 channel = cmd_id.split(":", 1)[1]

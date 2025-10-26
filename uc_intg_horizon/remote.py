@@ -5,6 +5,7 @@ Remote Control entity for Horizon integration.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -79,8 +80,18 @@ class HorizonRemote(Remote):
             self._create_colors_page(),
         ]
 
-        features = [Features.ON_OFF, Features.TOGGLE, Features.SEND_CMD]
-        attributes = {Attributes.STATE: States.UNAVAILABLE}
+        features = [
+            Features.ON_OFF, 
+            Features.TOGGLE, 
+            Features.SEND_CMD,
+            Features.SELECT_SOURCE
+        ]
+        
+        attributes = {
+            Attributes.STATE: States.UNAVAILABLE,
+            Attributes.SOURCE: "",
+            Attributes.SOURCE_LIST: []
+        }
 
         super().__init__(
             identifier=f"{device_id}_remote",
@@ -94,6 +105,17 @@ class HorizonRemote(Remote):
         )
 
         _LOG.info("Initialized Horizon Remote: %s (%s)", device_name, device_id)
+        
+        asyncio.create_task(self._load_sources())
+
+    async def _load_sources(self):
+        try:
+            sources = await self._client.get_sources(self._device_id)
+            source_list = [source["name"] for source in sources]
+            self.attributes[Attributes.SOURCE_LIST] = source_list
+            _LOG.info(f"Loaded {len(source_list)} sources for remote {self._device_id}")
+        except Exception as e:
+            _LOG.error(f"Failed to load sources for remote: {e}")
 
     def _create_main_page(self) -> UiPage:
         page = UiPage("main", "Main Control", grid=Size(4, 6))
@@ -185,6 +207,26 @@ class HorizonRemote(Remote):
                     self.attributes[Attributes.STATE] = States.OFF
                 else:
                     self.attributes[Attributes.STATE] = States.ON
+                    
+            elif cmd_id == Commands.SELECT_SOURCE:
+                if params and "source" in params:
+                    source = params["source"]
+                    _LOG.info(f"Remote: Select source: {source}")
+                    
+                    if source.startswith("HDMI") or source == "AV Input":
+                        await self._client.send_key(self._device_id, "Settings")
+                        _LOG.info("Opened settings for input selection")
+                    elif source in ["Netflix", "BBC iPlayer", "ITVX", "All 4", "My5", "Prime Video", "YouTube", "Disney+"]:
+                        _LOG.info(f"Launching app via play_media: {source}")
+                        await self._client.play_media(self._device_id, "app", source)
+                        _LOG.info(f"play_media call completed for app: {source}")
+                    else:
+                        await self._client.set_channel(self._device_id, source)
+                    
+                    self.attributes[Attributes.SOURCE] = source
+                else:
+                    _LOG.warning("SELECT_SOURCE called without source parameter")
+                    return StatusCodes.BAD_REQUEST
                     
             elif cmd_id == Commands.SEND_CMD:
                 command = params.get("command") if params else None

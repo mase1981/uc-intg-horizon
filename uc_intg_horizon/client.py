@@ -198,11 +198,49 @@ class HorizonClient:
 
     async def get_sources(self, device_id: str) -> list[dict[str, str]]:
         sources = []
-        
         sources.extend(COMMON_INPUTS)
-        sources.extend(COMMON_APPS)
         
-        _LOG.info(f"Returning {len(sources)} sources for {device_id}")
+        try:
+            box = await self.get_device_by_id(device_id)
+            if box:
+                _LOG.info(f"Attempting to discover available apps for {device_id}")
+                _LOG.debug(f"Box object attributes: {dir(box)}")
+                
+                discovered_apps = []
+                
+                if hasattr(box, 'channels_json') and box.channels_json:
+                    _LOG.info("Found channels_json attribute, scanning for apps...")
+                    channels = box.channels_json.get('channels', [])
+                    for channel in channels:
+                        if 'boundApps' in channel and channel.get('boundApps'):
+                            app_name = channel.get('name', 'Unknown')
+                            discovered_apps.append({"id": app_name.lower(), "name": app_name})
+                            _LOG.info(f"Discovered app: {app_name}")
+                
+                if hasattr(box, 'apps') and box.apps:
+                    _LOG.info("Found apps attribute")
+                    discovered_apps.extend([{"id": app.lower(), "name": app} for app in box.apps])
+                
+                if hasattr(box, 'available_apps') and box.available_apps:
+                    _LOG.info("Found available_apps attribute")
+                    discovered_apps.extend([{"id": app.lower(), "name": app} for app in box.available_apps])
+                
+                if discovered_apps:
+                    _LOG.info(f"Using {len(discovered_apps)} dynamically discovered apps")
+                    sources.extend(discovered_apps)
+                else:
+                    _LOG.info(f"No dynamic apps found, using static list of {len(COMMON_APPS)} apps")
+                    sources.extend(COMMON_APPS)
+            else:
+                _LOG.warning(f"Box not found for {device_id}, using static app list")
+                sources.extend(COMMON_APPS)
+                
+        except Exception as e:
+            _LOG.error(f"Error discovering apps: {e}", exc_info=True)
+            _LOG.info("Falling back to static app list")
+            sources.extend(COMMON_APPS)
+        
+        _LOG.info(f"Returning {len(sources)} total sources for {device_id}")
         return sources
 
     async def send_key(self, device_id: str, key: str) -> bool:
@@ -254,14 +292,14 @@ class HorizonClient:
                 _LOG.warning(f"Device not found: {device_id}")
                 return False
             
-            _LOG.info(f"Playing media on {device_id}: type={media_type}, id={media_id}")
+            _LOG.info(f"Calling box.play_media('{media_type}', '{media_id}') for device {device_id}")
             await asyncio.to_thread(box.play_media, media_type, media_id)
-            _LOG.info(f"Successfully started media playback on {device_id}")
+            _LOG.info(f"play_media() completed successfully for {device_id}")
             return True
             
         except Exception as e:
-            _LOG.error("Failed to play media on %s (type=%s, id=%s): %s", 
-                      device_id, media_type, media_id, e)
+            _LOG.error("play_media() failed on %s (type=%s, id=%s): %s", 
+                      device_id, media_type, media_id, e, exc_info=True)
             return False
 
     async def power_on(self, device_id: str) -> bool:
