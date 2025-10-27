@@ -34,6 +34,44 @@ _entities_ready: bool = False
 _initialization_lock: asyncio.Lock = asyncio.Lock()
 
 
+async def _on_token_refreshed(api_obj):
+    global _config
+    
+    if not _config or not api_obj:
+        _LOG.debug("Token callback skipped - config or API object not available")
+        return
+    
+    try:
+        current_token = getattr(api_obj, 'refresh_token', None)
+        
+        if not current_token:
+            _LOG.debug("No refresh token in API object")
+            return
+        
+        stored_token = _config.password
+        
+        _LOG.debug("🔄 Immediate callback - Token comparison: Stored: %s..., Current: %s...",
+                  stored_token[:20] if stored_token else "None",
+                  current_token[:20])
+        
+        if current_token != stored_token:
+            _LOG.warning("🔄 Token refreshed during connection - saving IMMEDIATELY (before MQTT wait)")
+            _LOG.info("Callback - Old token: %s...", stored_token[:20] if stored_token else "None")
+            _LOG.info("Callback - New token: %s...", current_token[:20])
+            
+            _config.password = current_token
+            
+            if _config.save_config():
+                _LOG.info("✅ Token saved to disk IMMEDIATELY (vulnerability window closed)")
+            else:
+                _LOG.error("❌ CRITICAL: Immediate token save failed in callback!")
+        else:
+            _LOG.debug("✅ Callback: Token unchanged during connection")
+            
+    except Exception as e:
+        _LOG.error("❌ Error in token refresh callback: %s", e, exc_info=True)
+
+
 async def _save_refreshed_token():
     global _config, _client
     
@@ -111,7 +149,7 @@ async def _initialize_integration():
                 _LOG.debug("Pre-connection token: %s...", 
                           _config.password[:20] if _config.password else "None")
                 
-                if not await _client.connect():
+                if not await _client.connect(token_save_callback=_on_token_refreshed):
                     _LOG.error("❌ Failed to connect to Horizon API")
                     return False
                 
@@ -195,7 +233,7 @@ async def on_connect() -> None:
         return
     
     if _client and _client.is_connected:
-        _LOG.info("💾 Checking if token needs to be saved after connection...")
+        _LOG.info("💾 Checking if token needs to be saved after connection (safety net)...")
         await _save_refreshed_token()
     else:
         _LOG.warning("⚠️ Client not connected, cannot check token state")
@@ -261,7 +299,7 @@ async def setup_handler(msg: SetupAction) -> SetupAction:
         await _initialize_integration()
         
         if _client and _client.is_connected:
-            _LOG.info("💾 Saving token after initial setup...")
+            _LOG.info("💾 Saving token after initial setup (safety net)...")
             await _save_refreshed_token()
     
     return action
@@ -286,7 +324,7 @@ async def main():
             await _initialize_integration()
             
             if _client and _client.is_connected:
-                _LOG.info("💾 Saving token after pre-initialization...")
+                _LOG.info("💾 Saving token after pre-initialization (safety net)...")
                 await _save_refreshed_token()
             
             _LOG.info("✅ Pre-initialization complete, entities ready for UC Remote")
