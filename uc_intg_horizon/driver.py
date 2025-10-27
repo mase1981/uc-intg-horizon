@@ -34,107 +34,72 @@ _entities_ready: bool = False
 _initialization_lock: asyncio.Lock = asyncio.Lock()
 
 
-async def _on_token_refreshed(api_obj):
-    global _config
-    
-    if not _config or not api_obj:
-        _LOG.debug("Token callback skipped - config or API object not available")
-        return
-    
-    try:
-        current_token = getattr(api_obj, 'refresh_token', None)
-        
-        if not current_token:
-            _LOG.debug("No refresh token in API object")
-            return
-        
-        stored_token = _config.password
-        
-        _LOG.debug("🔄 Immediate callback - Token comparison: Stored: %s..., Current: %s...",
-                  stored_token[:20] if stored_token else "None",
-                  current_token[:20])
-        
-        if current_token != stored_token:
-            _LOG.warning("🔄 Token refreshed during connection - saving IMMEDIATELY (before MQTT wait)")
-            _LOG.info("Callback - Old token: %s...", stored_token[:20] if stored_token else "None")
-            _LOG.info("Callback - New token: %s...", current_token[:20])
-            
-            _config.password = current_token
-            
-            if _config.save_config():
-                _LOG.info("✅ Token saved to disk IMMEDIATELY (vulnerability window closed)")
-            else:
-                _LOG.error("❌ CRITICAL: Immediate token save failed in callback!")
-        else:
-            _LOG.debug("✅ Callback: Token unchanged during connection")
-            
-    except Exception as e:
-        _LOG.error("❌ Error in token refresh callback: %s", e, exc_info=True)
-
-
 async def _save_refreshed_token():
+    """
+    Save refreshed token after connection - Home Assistant pattern.
+    
+    This must be called AFTER every successful connection
+    to ensure token persistence across reboots.
+    """
     global _config, _client
     
     if not _client or not _config:
-        _LOG.debug("Token save skipped - client or config not initialized")
         return
     
     try:
         current_token = getattr(_client._api, 'refresh_token', None)
         
-        if not current_token:
-            _LOG.debug("No refresh token available from API")
-            return
-        
-        stored_token = _config.password
-        
-        _LOG.debug("Token comparison - Stored: %s..., Current: %s...", 
-                  stored_token[:20] if stored_token else "None",
-                  current_token[:20])
-        
-        if current_token != stored_token:
-            _LOG.warning("🔄 Token was refreshed during connection - updating storage")
-            _LOG.info("Old token: %s...", stored_token[:20] if stored_token else "None")
+        if current_token and current_token != _config.password:
+            _LOG.info("Token was refreshed during connection, updating storage")
+            _LOG.info("Old token: %s...", _config.password[:20] if _config.password else "None")
             _LOG.info("New token: %s...", current_token[:20])
             
             _config.password = current_token
             
             if _config.save_config():
-                _LOG.info("✅ Refreshed token saved successfully to disk")
+                _LOG.info("✅ Refreshed token saved successfully")
             else:
-                _LOG.error("❌ CRITICAL: Failed to save refreshed token to disk!")
-                _LOG.error("This will cause 'Invalid token' errors after next reboot!")
+                _LOG.error("❌ Failed to save refreshed token!")
         else:
-            _LOG.debug("✅ Token unchanged, no save needed")
+            _LOG.debug("Token unchanged, no save needed")
             
     except Exception as e:
-        _LOG.error("❌ Error checking/saving refreshed token: %s", e, exc_info=True)
-        _LOG.error("This may cause authentication failures after reboot!")
+        _LOG.error("Error checking/saving refreshed token: %s", e, exc_info=True)
 
 
 async def _initialize_integration():
+    """
+    Initialize integration entities following UC persistence guide pattern.
+    
+    This must complete BEFORE DeviceStates.CONNECTED is set
+    to prevent race condition with entity subscriptions.
+    
+    CRITICAL: Only creates entities for device IDs that are:
+    1. In the saved configuration (config.json)
+    2. Currently ONLINE in the Horizon API
+    """
     global _config, _client, _media_players, _remotes, api, _entities_ready
     
     async with _initialization_lock:
         if _entities_ready and _client and _client.is_connected:
-            _LOG.info("✅ Entities already initialized and client connected")
-            _LOG.debug("Updating entity states without recreating entities...")
-            
+            _LOG.debug("Entities already initialized and connected")
+            # Update entity states
             for mp in _media_players.values():
                 await mp.push_update()
             for remote in _remotes.values():
                 await remote.push_update()
-            
-            _LOG.debug("Entity state update complete, continuing to connection phase...")
             return True
             
         if not _config or not _config.is_configured():
             _LOG.info("Integration not configured, skipping entity initialization")
             return False
             
-        _LOG.info("=== Starting Entity Initialization (Persistence Pattern) ===")
+        _LOG.info("=" * 70)
+        _LOG.info("=== Starting Entity Initialization (ID Matching Pattern) ===")
+        _LOG.info("=" * 70)
         
         try:
+            # Step 1: Ensure Horizon API client exists
             if not _client:
                 _LOG.info("Creating Horizon API client")
                 _client = HorizonClient(
@@ -143,114 +108,198 @@ async def _initialize_integration():
                     password=_config.password,
                 )
             
+            # Step 2: Connect to Horizon API (includes MQTT wait)
             if not _client.is_connected:
                 _LOG.info("Connecting to Horizon API (with MQTT wait)...")
-                
-                _LOG.debug("Pre-connection token: %s...", 
-                          _config.password[:20] if _config.password else "None")
-                
-                if not await _client.connect(token_save_callback=_on_token_refreshed):
+                if not await _client.connect():
                     _LOG.error("❌ Failed to connect to Horizon API")
                     return False
+                    
+                # Save token immediately after successful connection
+                await _save_refreshed_token()
                 
                 _LOG.info("✅ Connected to Horizon API")
             else:
                 _LOG.info("✅ Already connected to Horizon API")
             
+            # Step 3: Get current online devices from API
+            _LOG.info("Querying Horizon API for current device states...")
+            api_devices = await _client.get_devices()
+            
+            # Build a map of device_id -> device info for ONLINE devices only
+            online_device_map = {}
+            for device in api_devices:
+                device_id = device["device_id"]
+                device_state = device.get("state", "unknown")
+                
+                if device_state in ["ONLINE_RUNNING", "ONLINE_STANDBY"]:
+                    online_device_map[device_id] = device
+                    _LOG.info(f"  ✅ API reports ONLINE: {device['name']} (ID: {device_id}) - {device_state}")
+                else:
+                    _LOG.warning(f"  ⚠️  API reports OFFLINE: {device['name']} (ID: {device_id}) - {device_state}")
+            
+            _LOG.info(f"📊 API Status: {len(online_device_map)}/{len(api_devices)} devices are online")
+            
+            # Step 4: Match configured devices with currently online devices
+            _LOG.info(f"Matching {len(_config.devices)} configured device(s) with online devices...")
+            
+            devices_to_create = []
+            devices_skipped = []
+            
+            for config_device in _config.devices:
+                device_id = config_device["device_id"]
+                device_name = config_device["name"]
+                
+                # Check if this configured device is currently online
+                if device_id in online_device_map:
+                    devices_to_create.append({
+                        "device_id": device_id,
+                        "name": device_name,
+                        "state": online_device_map[device_id]["state"]
+                    })
+                    _LOG.info(f"  ✅ MATCH: {device_name} (ID: {device_id}) - Will create entities")
+                else:
+                    devices_skipped.append({
+                        "device_id": device_id,
+                        "name": device_name
+                    })
+                    _LOG.warning(f"  ⚠️  NO MATCH: {device_name} (ID: {device_id}) - Device offline or not found")
+            
+            # Report matching results
+            if devices_skipped:
+                _LOG.warning("=" * 70)
+                _LOG.warning(f"⚠️  {len(devices_skipped)} configured device(s) are currently OFFLINE:")
+                for d in devices_skipped:
+                    _LOG.warning(f"   - {d['name']} (ID: {d['device_id']})")
+                _LOG.warning("These devices will NOT have entities created until they come online")
+                _LOG.warning("💡 To add them: Power on the box and reconfigure the integration")
+                _LOG.warning("=" * 70)
+            
+            if not devices_to_create:
+                _LOG.error("❌ No online devices to create entities for!")
+                _LOG.error("All configured devices are currently offline")
+                return False
+            
+            # Step 5: Additional delay to ensure MQTT is fully stable
             _LOG.info("Waiting additional 2 seconds for MQTT stability...")
             await asyncio.sleep(2)
             
-            if not _entities_ready:
-                _LOG.info("Creating entities for %d devices...", len(_config.devices))
-                api.available_entities.clear()
-                _media_players.clear()
-                _remotes.clear()
-                
-                for device in _config.devices:
-                    device_id = device["device_id"]
-                    device_name = device["name"]
-                    
-                    _LOG.info("  Creating entities for: %s (%s)", device_name, device_id)
-                    
-                    media_player = HorizonMediaPlayer(
-                        device_id=device_id,
-                        device_name=device_name,
-                        client=_client,
-                        api=api,
-                    )
-                    _media_players[device_id] = media_player
-                    api.available_entities.add(media_player)
-                    
-                    remote = HorizonRemote(
-                        device_id=device_id,
-                        device_name=device_name,
-                        client=_client,
-                        api=api,
-                    )
-                    _remotes[device_id] = remote
-                    api.available_entities.add(remote)
-                
-                _entities_ready = True
-                
-                _LOG.info("✅ Entities ready: %d media players, %d remotes",
-                         len(_media_players), len(_remotes))
+            # Step 6: Clear and recreate entities ONLY for matched online devices
+            _LOG.info(f"Creating entities for {len(devices_to_create)} matched online device(s)...")
+            api.available_entities.clear()
+            _media_players.clear()
+            _remotes.clear()
             
-            _LOG.info("=== Entity Initialization Complete ===")
+            for device in devices_to_create:
+                device_id = device["device_id"]
+                device_name = device["name"]
+                device_state = device["state"]
+                
+                _LOG.info(f"  Creating entities for: {device_name} (ID: {device_id}, State: {device_state})")
+                
+                # Create Media Player
+                media_player = HorizonMediaPlayer(
+                    device_id=device_id,
+                    device_name=device_name,
+                    client=_client,
+                    api=api,
+                )
+                _media_players[device_id] = media_player
+                api.available_entities.add(media_player)
+                _LOG.info(f"    ✅ Created Media Player: {media_player.id}")
+                
+                # Create Remote
+                remote = HorizonRemote(
+                    device_id=device_id,
+                    device_name=device_name,
+                    client=_client,
+                    api=api,
+                )
+                _remotes[device_id] = remote
+                api.available_entities.add(remote)
+                _LOG.info(f"    ✅ Created Remote: {remote.id}")
+            
+            # Step 7: Mark entities ready BEFORE setting CONNECTED
+            _entities_ready = True
+            
+            _LOG.info("=" * 70)
+            _LOG.info("✅ Entity initialization complete!")
+            _LOG.info(f"📊 Summary:")
+            _LOG.info(f"   - Media Players created: {len(_media_players)}")
+            _LOG.info(f"   - Remotes created: {len(_remotes)}")
+            _LOG.info(f"   - Devices skipped (offline): {len(devices_skipped)}")
+            _LOG.info("=" * 70)
             
             return True
             
         except Exception as e:
-            _LOG.error("❌ Failed to initialize entities: %s", e, exc_info=True)
+            _LOG.error("Failed to initialize entities: %s", e, exc_info=True)
             _entities_ready = False
             return False
 
 
 async def on_connect() -> None:
-    global _config, _entities_ready, _client
+    """
+    Handle UC Remote connection event.
     
+    Following persistence guide: Only set CONNECTED after entities are ready.
+    """
+    global _config, _entities_ready
+    
+    _LOG.info("=" * 70)
     _LOG.info("=== UC Remote CONNECT Event ===")
+    _LOG.info("=" * 70)
     
     if not _config:
         _config = HorizonConfig()
     
     _config.reload_from_disk()
     
-    _LOG.debug("Loaded config - Provider: %s, Username: %s, Token: %s...",
-              _config.provider,
-              _config.username,
-              _config.password[:20] if _config.password else "None")
-    
     if not _config.is_configured():
         _LOG.info("Integration not configured - awaiting setup")
         await api.set_device_state(DeviceStates.DISCONNECTED)
         return
     
+    _LOG.info(f"Configuration loaded: {len(_config.devices)} device(s) in config")
+    for device in _config.devices:
+        _LOG.info(f"  - {device['name']} (ID: {device['device_id']})")
+    
+    # Initialize (or reinitialize if needed)
     success = await _initialize_integration()
     
     if not success:
-        _LOG.error("❌ Entity initialization failed")
+        _LOG.error("Entity initialization failed")
         await api.set_device_state(DeviceStates.ERROR)
         return
     
-    if _client and _client.is_connected:
-        _LOG.info("💾 Checking if token needs to be saved after connection (safety net)...")
-        await _save_refreshed_token()
-    else:
-        _LOG.warning("⚠️ Client not connected, cannot check token state")
-    
+    # Only set CONNECTED after entities are confirmed ready
     _LOG.info("✅ Setting device state to CONNECTED")
     await api.set_device_state(DeviceStates.CONNECTED)
 
 
 async def on_disconnect() -> None:
+    """
+    Handle UC Remote disconnection event.
+    
+    Following persistence guide: Keep entities and client alive for reconnection.
+    """
+    _LOG.info("=" * 70)
     _LOG.info("=== UC Remote DISCONNECT Event ===")
     _LOG.info("Preserving entities and connection for reconnection")
+    _LOG.info("=" * 70)
 
 
 async def on_subscribe_entities(entity_ids: list[str]):
-    _LOG.info("=== Entity Subscription Request ===")
-    _LOG.info("Requested entity IDs: %s", entity_ids)
+    """
+    Handle entity subscription requests.
     
+    Following persistence guide: Protect against race condition.
+    """
+    _LOG.info("=" * 70)
+    _LOG.info("=== Entity Subscription Request ===")
+    _LOG.info(f"Requested entity IDs: {entity_ids}")
+    
+    # Race condition protection
     if not _entities_ready:
         _LOG.error("⚠️ RACE CONDITION DETECTED: Subscription before entities ready!")
         _LOG.info("Attempting emergency initialization...")
@@ -258,35 +307,52 @@ async def on_subscribe_entities(entity_ids: list[str]):
         if _config and _config.is_configured():
             success = await _initialize_integration()
             if not success:
-                _LOG.error("❌ Emergency initialization failed")
+                _LOG.error("Emergency initialization failed")
                 return
         else:
-            _LOG.error("❌ Cannot initialize - no configuration available")
+            _LOG.error("Cannot initialize - no configuration available")
             return
     
+    # Log available entities for debugging
     available_ids = []
-    for mp in _media_players.values():
+    for device_id, mp in _media_players.items():
         available_ids.append(mp.id)
-    for remote in _remotes.values():
+    for device_id, remote in _remotes.items():
         available_ids.append(remote.id)
     
-    _LOG.info("Available entity IDs: %s", available_ids)
+    _LOG.info(f"Available entity IDs: {available_ids}")
     
+    # Process subscriptions
     for entity_id in entity_ids:
+        matched = False
+        
         for device_id, media_player in _media_players.items():
             if entity_id == media_player.id:
                 await media_player.push_update()
-                _LOG.info("✅ Subscribed to media player: %s", entity_id)
+                _LOG.info(f"✅ Subscribed to media player: {entity_id} (Device ID: {device_id})")
+                matched = True
                 break
         
-        for device_id, remote in _remotes.items():
-            if entity_id == remote.id:
-                await remote.push_update()
-                _LOG.info("✅ Subscribed to remote: %s", entity_id)
-                break
+        if not matched:
+            for device_id, remote in _remotes.items():
+                if entity_id == remote.id:
+                    await remote.push_update()
+                    _LOG.info(f"✅ Subscribed to remote: {entity_id} (Device ID: {device_id})")
+                    matched = True
+                    break
+        
+        if not matched:
+            _LOG.warning(f"⚠️  Entity not found: {entity_id}")
+    
+    _LOG.info("=" * 70)
 
 
 async def setup_handler(msg: SetupAction) -> SetupAction:
+    """
+    Handle setup flow.
+    
+    Following persistence guide: Initialize immediately after setup completes.
+    """
     global _setup_manager
     
     if not _setup_manager:
@@ -295,17 +361,21 @@ async def setup_handler(msg: SetupAction) -> SetupAction:
     action = await _setup_manager.handle_setup(msg)
     
     if isinstance(action, SetupComplete):
+        _LOG.info("=" * 70)
         _LOG.info("=== Setup Complete - Initializing Integration ===")
+        _LOG.info("=" * 70)
         await _initialize_integration()
-        
-        if _client and _client.is_connected:
-            _LOG.info("💾 Saving token after initial setup (safety net)...")
-            await _save_refreshed_token()
     
     return action
 
 
 async def main():
+    """
+    Main entry point.
+    
+    Following persistence guide: Pre-initialize entities if already configured.
+    Wait for initialization to complete BEFORE api.init()
+    """
     global api, _config
     
     try:
@@ -314,21 +384,23 @@ async def main():
         
         _config = HorizonConfig()
         
+        # Pre-initialize if already configured (reboot survival)
+        # WAIT for completion before proceeding - this prevents race condition!
         if _config.is_configured():
+            _LOG.info("=" * 70)
             _LOG.info("=== Pre-initialization for Reboot Survival ===")
             _LOG.info("Configuration found - initializing entities BEFORE UC Remote connects")
+            _LOG.info("=" * 70)
             
-            _LOG.debug("Initial token: %s...", 
-                      _config.password[:20] if _config.password else "None")
-            
+            # BLOCKING WAIT - do NOT use create_task here!
+            # This ensures entities exist before UC Remote tries to subscribe
             await _initialize_integration()
             
-            if _client and _client.is_connected:
-                _LOG.info("💾 Saving token after pre-initialization (safety net)...")
-                await _save_refreshed_token()
-            
+            _LOG.info("=" * 70)
             _LOG.info("✅ Pre-initialization complete, entities ready for UC Remote")
+            _LOG.info("=" * 70)
         
+        # Register event handlers
         api.add_listener(Events.CONNECT, on_connect)
         api.add_listener(Events.DISCONNECT, on_disconnect)
         api.add_listener(Events.SUBSCRIBE_ENTITIES, on_subscribe_entities)
@@ -336,7 +408,9 @@ async def main():
         await api.init("driver.json", setup_handler)
         await api.set_device_state(DeviceStates.DISCONNECTED)
         
+        _LOG.info("=" * 70)
         _LOG.info("=== Horizon Integration Driver Started ===")
+        _LOG.info("=" * 70)
         
         await asyncio.Future()
         
