@@ -5,6 +5,7 @@ Remote Control entity for Horizon integration.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -33,10 +34,12 @@ class HorizonRemote(Remote):
         device_name: str,
         client: HorizonClient,
         api,
+        media_player=None,
     ):
         self._device_id = device_id
         self._client = client
         self._api = api
+        self._media_player = media_player
 
         simple_commands = [
             "POWER_ON", "POWER_OFF", "POWER_TOGGLE",
@@ -171,6 +174,8 @@ class HorizonRemote(Remote):
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Remote command: %s (params=%s)", cmd_id, params)
 
+        is_channel_change = False
+
         try:
             if cmd_id == Commands.ON:
                 await self._client.power_on(self._device_id)
@@ -192,7 +197,7 @@ class HorizonRemote(Remote):
                 command = params.get("command") if params else None
                 if command:
                     _LOG.info(f"SEND_CMD received: {command}")
-                    await self._send_simple_command(command)
+                    is_channel_change = await self._send_simple_command(command)
                 else:
                     _LOG.warning("SEND_CMD without command parameter")
                     return StatusCodes.BAD_REQUEST
@@ -201,46 +206,56 @@ class HorizonRemote(Remote):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
+            if is_channel_change:
+                _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
+                await asyncio.sleep(2.0)
+            
             await self.push_update()
+            
+            if is_channel_change and self._media_player:
+                _LOG.debug("Triggering media player update after channel change")
+                await self._media_player.push_update()
+            
             return StatusCodes.OK
 
         except Exception as e:
             _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
-    async def _send_simple_command(self, command: str) -> None:
+    async def _send_simple_command(self, command: str) -> bool:
+
         _LOG.info(f"Processing simple command: {command}")
         
         if command.startswith("channel_select:"):
             channel = command.split(":", 1)[1]
             _LOG.info(f"Channel select command: {channel}")
             await self._client.set_channel(self._device_id, channel)
-            return
+            return True  # This is a channel change
         
         if command == "POWER_ON":
             _LOG.info("Calling power_on()")
             await self._client.power_on(self._device_id)
-            return
+            return False
             
         elif command == "POWER_OFF":
             _LOG.info("Calling power_off()")
             await self._client.power_off(self._device_id)
-            return
+            return False
             
         elif command == "POWER_TOGGLE":
             _LOG.info("Calling power_toggle()")
             await self._client.power_toggle(self._device_id)
-            return
+            return False
             
         elif command == "PLAYPAUSE":
             _LOG.info("Calling play_pause_toggle()")
             await self._client.play_pause_toggle(self._device_id)
-            return
+            return False
         
         elif command == "RECORD":
             _LOG.info("Sending MediaRecord key")
             await self._client.send_key(self._device_id, "MediaRecord")
-            return
+            return False
         
         command_map = {
             "UP": "ArrowUp",
@@ -275,10 +290,12 @@ class HorizonRemote(Remote):
         
         if not horizon_key:
             _LOG.warning(f"Unknown command: {command}")
-            return
+            return False
         
         _LOG.info(f"Sending: {command} -> {horizon_key}")
         await self._client.send_key(self._device_id, horizon_key)
+        
+        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT"]
 
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):

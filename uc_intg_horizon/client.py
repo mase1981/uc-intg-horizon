@@ -8,7 +8,7 @@ Horizon API client for device communication.
 import asyncio
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import certifi
 from lghorizon import LGHorizonApi, LGHorizonBox
@@ -32,7 +32,6 @@ COMMON_INPUTS = [
     {"id": "av", "name": "AV Input"},
 ]
 
-# Apps discovered from horizon_report.json - all working on Virgin Media
 COMMON_APPS = [
     {"id": "netflix", "name": "Netflix"},
     {"id": "iplayer", "name": "BBC iPlayer"},
@@ -62,7 +61,7 @@ class HorizonClient:
         _LOG.info(f"Horizon client initialized: provider={provider}, country_code={self.country_code}")
         _LOG.info(f"SSL certificate bundle: {certifi.where()}")
 
-    async def connect(self) -> bool:
+    async def connect(self, token_save_callback: Optional[Callable] = None) -> bool:
         try:
             _LOG.info("Connecting to Horizon API: provider=%s, username=%s", 
                      self.provider, self.username)
@@ -84,6 +83,15 @@ class HorizonClient:
                 )
             
             await asyncio.to_thread(self._api.connect)
+            
+            if token_save_callback:
+                _LOG.debug("🔄 Invoking token save callback immediately after API connection")
+                try:
+                    await token_save_callback(self._api)
+                except Exception as e:
+                    _LOG.error("❌ Token save callback failed: %s", e, exc_info=True)
+                    _LOG.warning("⚠️ Continuing despite callback failure - fallback saves will handle it")
+            
             await self._wait_for_mqtt_ready()
             
             self._connected = True
@@ -131,7 +139,7 @@ class HorizonClient:
                 
                 if ready_devices > 0:
                     _LOG.info(
-                        f"âœ“ MQTT ready: {ready_devices}/{total_devices} devices reported state "
+                        f"✓ MQTT ready: {ready_devices}/{total_devices} devices reported state "
                         f"({online_devices} online, {offline_devices} offline)"
                     )
                     if pending_devices:
@@ -152,11 +160,11 @@ class HorizonClient:
                 if hasattr(box, 'state') and box.state is not None
             )
             _LOG.warning(
-                f"âš ï¸ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
+                f"⚠️ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
                 f"devices ready - proceeding anyway (some devices may be offline/slow)"
             )
         else:
-            _LOG.error(f"âœ— MQTT ready timeout after {timeout}s with NO devices found")
+            _LOG.error(f"✗ MQTT ready timeout after {timeout}s with NO devices found")
             raise TimeoutError(f"MQTT connection not ready after {timeout}s - no devices discovered")
 
     async def disconnect(self) -> None:
@@ -200,10 +208,8 @@ class HorizonClient:
     async def get_sources(self, device_id: str) -> list[dict[str, str]]:
         sources = []
         
-        # Add HDMI inputs
         sources.extend(COMMON_INPUTS)
         
-        # Add apps (dynamically discovered)
         sources.extend(COMMON_APPS)
         
         _LOG.info(f"Returning {len(sources)} sources for {device_id}")
@@ -397,7 +403,6 @@ class HorizonClient:
             if not box:
                 return False
             
-            # Use send_key instead of native method to avoid alignment issue
             await asyncio.to_thread(box.send_key_to_box, "ChannelUp")
             _LOG.debug("Channel up command sent to %s", device_id)
             return True
@@ -411,7 +416,6 @@ class HorizonClient:
             if not box:
                 return False
             
-            # Use send_key instead of native method to avoid alignment issue
             await asyncio.to_thread(box.send_key_to_box, "ChannelDown")
             _LOG.debug("Channel down command sent to %s", device_id)
             return True
@@ -427,14 +431,9 @@ class HorizonClient:
             
             _LOG.info(f"Playing media: type={media_type}, id={media_id} on {device_id}")
             
-            # WORKAROUND: LGHorizonBox doesn't have play_media method
-            # For now, open the apps/home menu for manual selection
-            # TODO: Investigate proper app launching via lghorizon library
-            
             if media_type == "app":
                 _LOG.warning(f"Direct app launch not supported yet - opening home menu for {media_id}")
                 _LOG.info("User must manually select app from menu")
-                # Open home menu where apps can be accessed
                 await asyncio.to_thread(box.send_key_to_box, "MediaTopMenu")
                 _LOG.info(f"Opened home menu for app selection: {media_id}")
                 return True

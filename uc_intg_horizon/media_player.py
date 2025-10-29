@@ -30,6 +30,7 @@ class HorizonMediaPlayer(MediaPlayer):
         self._device_id = device_id
         self._client = client
         self._api = api
+        self._refresh_task = None  # For periodic refresh
 
         features = [
             Features.ON_OFF,
@@ -74,7 +75,9 @@ class HorizonMediaPlayer(MediaPlayer):
 
         _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
         
+        # Start background tasks
         asyncio.create_task(self._load_sources())
+        asyncio.create_task(self._start_periodic_refresh())
 
     async def _load_sources(self):
         try:
@@ -85,10 +88,40 @@ class HorizonMediaPlayer(MediaPlayer):
         except Exception as e:
             _LOG.error(f"Failed to load sources: {e}")
 
+    async def _start_periodic_refresh(self):
+        """
+        Periodic refresh mechanism (15 seconds) to prevent media display freezing.
+        
+        This matches lghorizon's approach to keep media info current, especially
+        for live TV where program info changes regularly.
+        """
+        _LOG.info(f"Starting 15-second periodic refresh for {self._device_id}")
+        
+        # Wait a bit before starting to avoid startup race conditions
+        await asyncio.sleep(5)
+        
+        while True:
+            try:
+                # Only refresh if entity is configured (subscribed by UC Remote)
+                if self._api and self._api.configured_entities.contains(self.id):
+                    _LOG.debug(f"Periodic refresh triggered for {self._device_id}")
+                    await self.push_update()
+                
+                # Wait 15 seconds before next refresh
+                await asyncio.sleep(15)
+                
+            except asyncio.CancelledError:
+                _LOG.info(f"Periodic refresh stopped for {self._device_id}")
+                break
+            except Exception as e:
+                _LOG.error(f"Error in periodic refresh for {self._device_id}: {e}")
+                # Continue despite errors, wait 15 seconds before retry
+                await asyncio.sleep(15)
+
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
-        # Track if this is a channel-changing command for delayed update
+        # Track if this is a channel-changing command
         is_channel_change = False
 
         try:
@@ -128,13 +161,11 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.NEXT:
                 _LOG.info("Media Player: Next channel")
                 await self._client.next_channel(self._device_id)
-                # Flag for delayed update to allow MQTT message to arrive
                 is_channel_change = True
                 
             elif cmd_id == Commands.PREVIOUS:
                 _LOG.info("Media Player: Previous channel")
                 await self._client.previous_channel(self._device_id)
-                # Flag for delayed update to allow MQTT message to arrive
                 is_channel_change = True
                 
             elif cmd_id == Commands.FAST_FORWARD:
@@ -210,13 +241,11 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
                 await self._client.next_channel(self._device_id)
-                # Flag for delayed update to allow MQTT message to arrive
                 is_channel_change = True
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
                 _LOG.info("Media Player: Channel down")
                 await self._client.previous_channel(self._device_id)
-                # Flag for delayed update to allow MQTT message to arrive
                 is_channel_change = True
                 
             elif cmd_id == Commands.SELECT_SOURCE:
@@ -232,6 +261,7 @@ class HorizonMediaPlayer(MediaPlayer):
                         _LOG.info(f"Launched app: {source}")
                     else:
                         await self._client.set_channel(self._device_id, source)
+                        is_channel_change = True
                     
                     self.attributes[Attributes.SOURCE] = source
                 else:
@@ -246,15 +276,13 @@ class HorizonMediaPlayer(MediaPlayer):
                 channel = cmd_id.split(":", 1)[1]
                 _LOG.info(f"Media Player: Channel select -> {channel}")
                 await self._client.set_channel(self._device_id, channel)
-                # Flag for delayed update to allow MQTT message to arrive
                 is_channel_change = True
 
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # Delayed update for channel changes to allow MQTT messages to arrive
-            # Following SkyQ pattern: wait for MQTT to update state before pushing
+            # Wait for MQTT update after channel changes (lghorizon pattern)
             if is_channel_change:
                 _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
                 await asyncio.sleep(2.0)
