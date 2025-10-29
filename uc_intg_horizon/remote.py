@@ -223,13 +223,14 @@ class HorizonRemote(Remote):
             return StatusCodes.SERVER_ERROR
 
     async def _send_simple_command(self, command: str) -> bool:
+
         _LOG.info(f"Processing simple command: {command}")
         
         if command.startswith("channel_select:"):
             channel = command.split(":", 1)[1]
             _LOG.info(f"Channel select command: {channel}")
             await self._client.set_channel(self._device_id, channel)
-            return True
+            return True  # This is a channel change
         
         if command == "POWER_ON":
             _LOG.info("Calling power_on()")
@@ -282,7 +283,6 @@ class HorizonRemote(Remote):
             "SOURCE": "Settings",
         }
         
-        # Number keys (0-9) can be used for channel entry
         for i in range(10):
             command_map[str(i)] = str(i)
         
@@ -295,8 +295,7 @@ class HorizonRemote(Remote):
         _LOG.info(f"Sending: {command} -> {horizon_key}")
         await self._client.send_key(self._device_id, horizon_key)
         
-        # Return True if this was a channel-changing command
-        return command in ["CHANNEL_UP", "CHANNEL_DOWN"]
+        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT"]
 
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):
