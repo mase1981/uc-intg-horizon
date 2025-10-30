@@ -49,7 +49,7 @@ class HorizonRemote(Remote):
             "CHANNEL_UP", "CHANNEL_DOWN", "GUIDE",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
             "RED", "GREEN", "YELLOW", "BLUE",
-            "HOME", "TV", "MENU", "SOURCE",
+            "HOME", "TV", "MENU", "SOURCE", "DVR",
         ]
 
         button_mapping = [
@@ -257,6 +257,11 @@ class HorizonRemote(Remote):
             await self._client.send_key(self._device_id, "MediaRecord")
             return False
         
+        elif command == "DVR":
+            _LOG.info("Sending DVR key")
+            await self._client.send_key(self._device_id, "DVR")
+            return False
+        
         command_map = {
             "UP": "ArrowUp",
             "DOWN": "ArrowDown",
@@ -281,6 +286,7 @@ class HorizonRemote(Remote):
             "TV": "TV",
             "MENU": "ContextMenu",
             "SOURCE": "Settings",
+            "DVR": "DVR",
         }
         
         for i in range(10):
