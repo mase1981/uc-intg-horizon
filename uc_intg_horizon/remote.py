@@ -40,6 +40,7 @@ class HorizonRemote(Remote):
         self._client = client
         self._api = api
         self._media_player = media_player
+        self._digit_update_task = None
 
         simple_commands = [
             "POWER_ON", "POWER_OFF", "POWER_TOGGLE",
@@ -301,7 +302,25 @@ class HorizonRemote(Remote):
         _LOG.info(f"Sending: {command} -> {horizon_key}")
         await self._client.send_key(self._device_id, horizon_key)
         
-        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        if command in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]:
+            if self._digit_update_task and not self._digit_update_task.done():
+                self._digit_update_task.cancel()
+            
+            self._digit_update_task = asyncio.create_task(self._delayed_digit_update())
+            return False
+        
+        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT"]
+
+    async def _delayed_digit_update(self):
+        """Wait 2 seconds after last digit press, then update media player."""
+        try:
+            await asyncio.sleep(2.0)
+            _LOG.info("Digit entry complete (2s timeout) - updating media player")
+            if self._media_player:
+                await self._media_player.push_update()
+        except asyncio.CancelledError:
+            _LOG.debug("Digit update cancelled - new digit pressed")
+            raise
 
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):
