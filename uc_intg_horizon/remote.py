@@ -230,7 +230,7 @@ class HorizonRemote(Remote):
             channel = command.split(":", 1)[1]
             _LOG.info(f"Channel select command: {channel}")
             await self._client.set_channel(self._device_id, channel)
-            return True  # This is a channel change
+            return True
         
         if command == "POWER_ON":
             _LOG.info("Calling power_on()")
@@ -301,7 +301,7 @@ class HorizonRemote(Remote):
         _LOG.info(f"Sending: {command} -> {horizon_key}")
         await self._client.send_key(self._device_id, horizon_key)
         
-        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT"]
+        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):
