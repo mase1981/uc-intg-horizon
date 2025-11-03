@@ -7,6 +7,7 @@ Media Player entity for Horizon integration.
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 from ucapi import EntityTypes, MediaPlayer, StatusCodes
@@ -18,7 +19,6 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonMediaPlayer(MediaPlayer):
-    """Horizon Media Player entity implementation."""
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class HorizonMediaPlayer(MediaPlayer):
         self._device_id = device_id
         self._client = client
         self._api = api
-        self._refresh_task = None  # For periodic refresh
+        self._refresh_task = None
 
         features = [
             Features.ON_OFF,
@@ -53,13 +53,18 @@ class HorizonMediaPlayer(MediaPlayer):
             Features.GUIDE,
             Features.INFO,
             Features.MEDIA_TITLE,
+            Features.MEDIA_ARTIST,
             Features.MEDIA_IMAGE_URL,
+            Features.MEDIA_POSITION,
         ]
 
         attributes = {
             Attributes.STATE: States.UNAVAILABLE,
             Attributes.MEDIA_TITLE: "",
+            Attributes.MEDIA_ARTIST: "",
             Attributes.MEDIA_IMAGE_URL: "",
+            Attributes.MEDIA_POSITION: 0,
+            Attributes.MEDIA_DURATION: 0,
             Attributes.MUTED: False,
             Attributes.SOURCE: "",
             Attributes.SOURCE_LIST: [],
@@ -89,25 +94,16 @@ class HorizonMediaPlayer(MediaPlayer):
             _LOG.error(f"Failed to load sources: {e}")
 
     async def _start_periodic_refresh(self):
-        """
-        Periodic refresh mechanism (15 seconds) to prevent media display freezing.
-        
-        This matches lghorizon's approach to keep media info current, especially
-        for live TV where program info changes regularly.
-        """
         _LOG.info(f"Starting 15-second periodic refresh for {self._device_id}")
         
-        # Wait a bit before starting to avoid startup race conditions
         await asyncio.sleep(5)
         
         while True:
             try:
-                # Only refresh if entity is configured (subscribed by UC Remote)
                 if self._api and self._api.configured_entities.contains(self.id):
                     _LOG.debug(f"Periodic refresh triggered for {self._device_id}")
                     await self.push_update()
                 
-                # Wait 15 seconds before next refresh
                 await asyncio.sleep(15)
                 
             except asyncio.CancelledError:
@@ -115,13 +111,11 @@ class HorizonMediaPlayer(MediaPlayer):
                 break
             except Exception as e:
                 _LOG.error(f"Error in periodic refresh for {self._device_id}: {e}")
-                # Continue despite errors, wait 15 seconds before retry
                 await asyncio.sleep(15)
 
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
-        # Track if this is a channel-changing command
         is_channel_change = False
 
         try:
@@ -282,7 +276,6 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # Wait for MQTT update after channel changes (lghorizon pattern)
             if is_channel_change:
                 _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
                 await asyncio.sleep(2.0)
@@ -294,11 +287,63 @@ class HorizonMediaPlayer(MediaPlayer):
             _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
+    def _calculate_position_duration(self, start_time, end_time, position=None):
+        try:
+            if position is not None:
+                if start_time and end_time:
+                    if isinstance(start_time, (int, float)):
+                        start_dt = datetime.fromtimestamp(start_time)
+                    else:
+                        start_dt = datetime.fromisoformat(str(start_time))
+                    
+                    if isinstance(end_time, (int, float)):
+                        end_dt = datetime.fromtimestamp(end_time)
+                    else:
+                        end_dt = datetime.fromisoformat(str(end_time))
+                    
+                    duration = int((end_dt - start_dt).total_seconds())
+                    return (int(position), duration)
+            
+            if start_time and end_time:
+                now = datetime.now()
+                
+                if isinstance(start_time, (int, float)):
+                    start_dt = datetime.fromtimestamp(start_time)
+                else:
+                    start_dt = datetime.fromisoformat(str(start_time))
+                
+                if isinstance(end_time, (int, float)):
+                    end_dt = datetime.fromtimestamp(end_time)
+                else:
+                    end_dt = datetime.fromisoformat(str(end_time))
+                
+                position_seconds = int((now - start_dt).total_seconds())
+                
+                duration_seconds = int((end_dt - start_dt).total_seconds())
+                
+                # Clamp position to valid range
+                position_seconds = max(0, min(position_seconds, duration_seconds))
+                
+                _LOG.debug(
+                    "Calculated position: %d/%d seconds (%.1f%%)",
+                    position_seconds,
+                    duration_seconds,
+                    (position_seconds / duration_seconds * 100) if duration_seconds > 0 else 0
+                )
+                
+                return (position_seconds, duration_seconds)
+                
+        except Exception as e:
+            _LOG.debug("Could not calculate position/duration: %s", e)
+        
+        return (0, 0)
+
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):
             device_state = await self._client.get_device_state(self._device_id)
             horizon_state = device_state.get("state", "unavailable")
             
+            # Update power state
             if horizon_state == "ONLINE_RUNNING":
                 self.attributes[Attributes.STATE] = States.PLAYING
             elif horizon_state == "ONLINE_STANDBY":
@@ -308,17 +353,53 @@ class HorizonMediaPlayer(MediaPlayer):
             else:
                 self.attributes[Attributes.STATE] = States.UNAVAILABLE
             
-            if device_state.get("channel"):
-                channel_name = device_state.get("channel", "")
-                program_title = device_state.get("media_title", "")
-                
-                if program_title:
-                    self.attributes[Attributes.MEDIA_TITLE] = f"{channel_name} - {program_title}"
-                else:
-                    self.attributes[Attributes.MEDIA_TITLE] = channel_name
+            channel_name = device_state.get("channel", "")
+            program_title = device_state.get("media_title", "")
             
+            if program_title:
+                # Line 1: Program title (main display)
+                self.attributes[Attributes.MEDIA_TITLE] = program_title
+                # Line 2: Channel name (artist field)
+                self.attributes[Attributes.MEDIA_ARTIST] = channel_name
+                
+                _LOG.debug(
+                    "Media display - Line 1: '%s', Line 2: '%s'",
+                    program_title,
+                    channel_name
+                )
+            elif channel_name:
+                # Only channel available - show on main line
+                self.attributes[Attributes.MEDIA_TITLE] = channel_name
+                self.attributes[Attributes.MEDIA_ARTIST] = ""
+            else:
+                # No media info
+                self.attributes[Attributes.MEDIA_TITLE] = ""
+                self.attributes[Attributes.MEDIA_ARTIST] = ""
+            
+            # Update artwork
             if device_state.get("media_image"):
                 self.attributes[Attributes.MEDIA_IMAGE_URL] = device_state["media_image"]
+            
+            # Update seek bar (position/duration)
+            start_time = device_state.get("start_time")
+            end_time = device_state.get("end_time")
+            position = device_state.get("position")
+            
+            if start_time and end_time:
+                pos, dur = self._calculate_position_duration(start_time, end_time, position)
+                self.attributes[Attributes.MEDIA_POSITION] = pos
+                self.attributes[Attributes.MEDIA_DURATION] = dur
+                
+                _LOG.debug(
+                    "Seek bar - Position: %d/%d seconds (%.1f%%)",
+                    pos,
+                    dur,
+                    (pos / dur * 100) if dur > 0 else 0
+                )
+            else:
+                # No timing info - hide seek bar
+                self.attributes[Attributes.MEDIA_POSITION] = 0
+                self.attributes[Attributes.MEDIA_DURATION] = 0
             
             self._api.configured_entities.update_attributes(self.id, self.attributes)
             _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])

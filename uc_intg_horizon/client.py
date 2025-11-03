@@ -85,12 +85,12 @@ class HorizonClient:
             await asyncio.to_thread(self._api.connect)
             
             if token_save_callback:
-                _LOG.debug("🔄 Invoking token save callback immediately after API connection")
+                _LOG.debug("ðŸ”„ Invoking token save callback immediately after API connection")
                 try:
                     await token_save_callback(self._api)
                 except Exception as e:
-                    _LOG.error("❌ Token save callback failed: %s", e, exc_info=True)
-                    _LOG.warning("⚠️ Continuing despite callback failure - fallback saves will handle it")
+                    _LOG.error("Token save callback failed: %s", e, exc_info=True)
+                    _LOG.warning("Continuing despite callback failure - fallback saves will handle it")
             
             await self._wait_for_mqtt_ready()
             
@@ -139,7 +139,7 @@ class HorizonClient:
                 
                 if ready_devices > 0:
                     _LOG.info(
-                        f"✓ MQTT ready: {ready_devices}/{total_devices} devices reported state "
+                        f"âœ“ MQTT ready: {ready_devices}/{total_devices} devices reported state "
                         f"({online_devices} online, {offline_devices} offline)"
                     )
                     if pending_devices:
@@ -160,11 +160,11 @@ class HorizonClient:
                 if hasattr(box, 'state') and box.state is not None
             )
             _LOG.warning(
-                f"⚠️ MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
+                f"MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
                 f"devices ready - proceeding anyway (some devices may be offline/slow)"
             )
         else:
-            _LOG.error(f"✗ MQTT ready timeout after {timeout}s with NO devices found")
+            _LOG.error(f"âœ— MQTT ready timeout after {timeout}s with NO devices found")
             raise TimeoutError(f"MQTT connection not ready after {timeout}s - no devices discovered")
 
     async def disconnect(self) -> None:
@@ -456,6 +456,9 @@ class HorizonClient:
                 "channel": None,
                 "media_title": None,
                 "media_image": None,
+                "start_time": None,
+                "end_time": None,
+                "position": None,
             }
             
             if hasattr(box, "playing_info") and box.playing_info:
@@ -463,6 +466,19 @@ class HorizonClient:
                 state["channel"] = getattr(playing_info, "channel_title", None)
                 state["media_title"] = getattr(playing_info, "title", None)
                 state["media_image"] = getattr(playing_info, "image", None)
+                state["start_time"] = getattr(playing_info, "start_time", None)
+                state["end_time"] = getattr(playing_info, "end_time", None)
+                state["position"] = getattr(playing_info, "position", None)
+                
+                _LOG.debug(
+                    "Media info for %s: channel=%s, title=%s, start=%s, end=%s, position=%s",
+                    device_id,
+                    state["channel"],
+                    state["media_title"],
+                    state["start_time"],
+                    state["end_time"],
+                    state["position"]
+                )
             
             return state
             
