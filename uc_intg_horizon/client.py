@@ -466,19 +466,9 @@ class HorizonClient:
                 state["channel"] = getattr(playing_info, "channel_title", None)
                 state["media_title"] = getattr(playing_info, "title", None)
                 state["media_image"] = getattr(playing_info, "image", None)
-                state["start_time"] = getattr(playing_info, "start_time", None)
-                state["end_time"] = getattr(playing_info, "end_time", None)
+                state["start_time"] = getattr(playing_info, "startTime", None) or getattr(playing_info, "start_time", None)
+                state["end_time"] = getattr(playing_info, "endTime", None) or getattr(playing_info, "end_time", None)
                 state["position"] = getattr(playing_info, "position", None)
-                
-                _LOG.debug(
-                    "Media info for %s: channel=%s, title=%s, start=%s, end=%s, position=%s",
-                    device_id,
-                    state["channel"],
-                    state["media_title"],
-                    state["start_time"],
-                    state["end_time"],
-                    state["position"]
-                )
             
             return state
             
