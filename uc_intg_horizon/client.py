@@ -1,5 +1,5 @@
 """
-Horizon API client for device communication.
+Horizon API client for device communication - DIAGNOSTIC VERSION
 
 :copyright: (c) 2025 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
@@ -85,7 +85,7 @@ class HorizonClient:
             await asyncio.to_thread(self._api.connect)
             
             if token_save_callback:
-                _LOG.debug("ðŸ”„ Invoking token save callback immediately after API connection")
+                _LOG.debug("Invoking token save callback immediately after API connection")
                 try:
                     await token_save_callback(self._api)
                 except Exception as e:
@@ -139,7 +139,7 @@ class HorizonClient:
                 
                 if ready_devices > 0:
                     _LOG.info(
-                        f"âœ“ MQTT ready: {ready_devices}/{total_devices} devices reported state "
+                        f"MQTT ready: {ready_devices}/{total_devices} devices reported state "
                         f"({online_devices} online, {offline_devices} offline)"
                     )
                     if pending_devices:
@@ -164,7 +164,7 @@ class HorizonClient:
                 f"devices ready - proceeding anyway (some devices may be offline/slow)"
             )
         else:
-            _LOG.error(f"âœ— MQTT ready timeout after {timeout}s with NO devices found")
+            _LOG.error(f"MQTT ready timeout after {timeout}s with NO devices found")
             raise TimeoutError(f"MQTT connection not ready after {timeout}s - no devices discovered")
 
     async def disconnect(self) -> None:
@@ -463,12 +463,34 @@ class HorizonClient:
             
             if hasattr(box, "playing_info") and box.playing_info:
                 playing_info = box.playing_info
+                
+                _LOG.warning("========== DIAGNOSTIC: playing_info INSPECTION ==========")
+                _LOG.warning(f"Type: {type(playing_info)}")
+                _LOG.warning(f"Dir: {dir(playing_info)}")
+                _LOG.warning(f"Has __dict__: {hasattr(playing_info, '__dict__')}")
+                if hasattr(playing_info, '__dict__'):
+                    _LOG.warning(f"__dict__: {playing_info.__dict__}")
+                
                 state["channel"] = getattr(playing_info, "channel_title", None)
                 state["media_title"] = getattr(playing_info, "title", None)
                 state["media_image"] = getattr(playing_info, "image", None)
-                state["start_time"] = getattr(playing_info, "startTime", None) or getattr(playing_info, "start_time", None)
-                state["end_time"] = getattr(playing_info, "endTime", None) or getattr(playing_info, "end_time", None)
-                state["position"] = getattr(playing_info, "position", None)
+                
+                start_snake = getattr(playing_info, "start_time", None)
+                start_camel = getattr(playing_info, "startTime", None)
+                end_snake = getattr(playing_info, "end_time", None)
+                end_camel = getattr(playing_info, "endTime", None)
+                position = getattr(playing_info, "position", None)
+                
+                _LOG.warning(f"start_time (snake_case): {start_snake}")
+                _LOG.warning(f"startTime (camelCase): {start_camel}")
+                _LOG.warning(f"end_time (snake_case): {end_snake}")
+                _LOG.warning(f"endTime (camelCase): {end_camel}")
+                _LOG.warning(f"position: {position}")
+                _LOG.warning("========== END DIAGNOSTIC ==========")
+                
+                state["start_time"] = start_camel or start_snake
+                state["end_time"] = end_camel or end_snake
+                state["position"] = position
             
             return state
             
