@@ -26,7 +26,6 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonRemote(Remote):
-    """Horizon Remote Control entity implementation."""
 
     def __init__(
         self,
@@ -99,6 +98,28 @@ class HorizonRemote(Remote):
         )
 
         _LOG.info("Initialized Horizon Remote: %s (%s)", device_name, device_id)
+        
+        asyncio.create_task(self._start_periodic_refresh())
+
+    async def _start_periodic_refresh(self):
+        _LOG.info(f"Starting 15-second periodic refresh for remote {self._device_id}")
+        
+        await asyncio.sleep(5)
+        
+        while True:
+            try:
+                if self._api and self._api.configured_entities.contains(self.id):
+                    _LOG.debug(f"Periodic refresh triggered for remote {self._device_id}")
+                    await self.push_update()
+                
+                await asyncio.sleep(15)
+                
+            except asyncio.CancelledError:
+                _LOG.info(f"Periodic refresh stopped for remote {self._device_id}")
+                break
+            except Exception as e:
+                _LOG.error(f"Error in periodic refresh for remote {self._device_id}: {e}")
+                await asyncio.sleep(15)
 
     def _create_main_page(self) -> UiPage:
         page = UiPage("main", "Main Control", grid=Size(4, 6))
@@ -175,16 +196,19 @@ class HorizonRemote(Remote):
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Remote command: %s (params=%s)", cmd_id, params)
 
+        is_power_command = False
         is_channel_change = False
 
         try:
             if cmd_id == Commands.ON:
                 await self._client.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
+                is_power_command = True
                 
             elif cmd_id == Commands.OFF:
                 await self._client.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.OFF
+                is_power_command = True
                 
             elif cmd_id == Commands.TOGGLE:
                 await self._client.power_toggle(self._device_id)
@@ -193,12 +217,13 @@ class HorizonRemote(Remote):
                     self.attributes[Attributes.STATE] = States.OFF
                 else:
                     self.attributes[Attributes.STATE] = States.ON
+                is_power_command = True
                     
             elif cmd_id == Commands.SEND_CMD:
                 command = params.get("command") if params else None
                 if command:
                     _LOG.info(f"SEND_CMD received: {command}")
-                    is_channel_change = await self._send_simple_command(command)
+                    is_power_command, is_channel_change = await self._send_simple_command(command)
                 else:
                     _LOG.warning("SEND_CMD without command parameter")
                     return StatusCodes.BAD_REQUEST
@@ -207,7 +232,10 @@ class HorizonRemote(Remote):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            if is_channel_change:
+            if is_power_command:
+                _LOG.debug("Power command executed - waiting 3s for MQTT state update...")
+                await asyncio.sleep(3.0)
+            elif is_channel_change:
                 _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
                 await asyncio.sleep(2.0)
             
@@ -223,45 +251,47 @@ class HorizonRemote(Remote):
             _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
-    async def _send_simple_command(self, command: str) -> bool:
-
+    async def _send_simple_command(self, command: str) -> tuple[bool, bool]:
         _LOG.info(f"Processing simple command: {command}")
+        
+        is_power_command = False
+        is_channel_change = False
         
         if command.startswith("channel_select:"):
             channel = command.split(":", 1)[1]
             _LOG.info(f"Channel select command: {channel}")
             await self._client.set_channel(self._device_id, channel)
-            return True
+            return (False, True)
         
         if command == "POWER_ON":
             _LOG.info("Calling power_on()")
             await self._client.power_on(self._device_id)
-            return False
+            return (True, False)
             
         elif command == "POWER_OFF":
             _LOG.info("Calling power_off()")
             await self._client.power_off(self._device_id)
-            return False
+            return (True, False)
             
         elif command == "POWER_TOGGLE":
             _LOG.info("Calling power_toggle()")
             await self._client.power_toggle(self._device_id)
-            return False
+            return (True, False)
             
         elif command == "PLAYPAUSE":
             _LOG.info("Calling play_pause_toggle()")
             await self._client.play_pause_toggle(self._device_id)
-            return False
+            return (False, False)
         
         elif command == "RECORD":
             _LOG.info("Sending MediaRecord key")
             await self._client.send_key(self._device_id, "MediaRecord")
-            return False
+            return (False, False)
         
         elif command == "DVR":
             _LOG.info("Sending DVR key")
             await self._client.send_key(self._device_id, "DVR")
-            return False
+            return (False, False)
         
         command_map = {
             "UP": "ArrowUp",
@@ -297,7 +327,7 @@ class HorizonRemote(Remote):
         
         if not horizon_key:
             _LOG.warning(f"Unknown command: {command}")
-            return False
+            return (False, False)
         
         _LOG.info(f"Sending: {command} -> {horizon_key}")
         await self._client.send_key(self._device_id, horizon_key)
@@ -307,12 +337,12 @@ class HorizonRemote(Remote):
                 self._digit_update_task.cancel()
             
             self._digit_update_task = asyncio.create_task(self._delayed_digit_update())
-            return False
+            return (False, False)
         
-        return command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT"]
+        is_channel_change = command in ["CHANNEL_UP", "CHANNEL_DOWN", "SELECT"]
+        return (False, is_channel_change)
 
     async def _delayed_digit_update(self):
-        """Wait 2 seconds after last digit press, then update media player."""
         try:
             await asyncio.sleep(2.0)
             _LOG.info("Digit entry complete (2s timeout) - updating media player")
@@ -327,12 +357,18 @@ class HorizonRemote(Remote):
             device_state = await self._client.get_device_state(self._device_id)
             horizon_state = device_state.get("state", "unavailable")
             
+            _LOG.debug(f"Remote device state for {self._device_id}: {horizon_state}")
+            
             if horizon_state == "ONLINE_RUNNING":
                 self.attributes[Attributes.STATE] = States.ON
-            elif horizon_state in ["ONLINE_STANDBY", "OFFLINE"]:
+            elif horizon_state == "ONLINE_STANDBY":
                 self.attributes[Attributes.STATE] = States.OFF
+            elif horizon_state == "OFFLINE":
+                self.attributes[Attributes.STATE] = States.OFF
+                _LOG.debug(f"{self.id} - Device is OFF (powered down)")
             else:
                 self.attributes[Attributes.STATE] = States.UNAVAILABLE
+                _LOG.warning(f"{self.id} - Device is UNAVAILABLE (no MQTT communication)")
             
             self._api.configured_entities.update_attributes(self.id, self.attributes)
             _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])

@@ -1,5 +1,5 @@
 """
-Horizon API client for device communication - DIAGNOSTIC VERSION
+Horizon API client for device communication.
 
 :copyright: (c) 2025 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
@@ -109,12 +109,15 @@ class HorizonClient:
             return False
 
 
-    async def _wait_for_mqtt_ready(self, timeout: int = 15, check_interval: float = 0.5):
+    async def _wait_for_mqtt_ready(self, timeout: int = 25, check_interval: float = 0.5):
         if not self._api:
             return
         
         elapsed = 0
-        _LOG.debug("Waiting for devices to register on MQTT...")
+        retry_attempts = [3, 5, 8]
+        current_retry = 0
+        
+        _LOG.debug("Waiting for devices to register on MQTT (R2 firmware-aware)...")
         
         while elapsed < timeout:
             if hasattr(self._api, 'settop_boxes') and len(self._api.settop_boxes) > 0:
@@ -145,6 +148,14 @@ class HorizonClient:
                     if pending_devices:
                         _LOG.info(f"Proceeding with {len(pending_devices)} devices still pending: {pending_devices}")
                     return
+                
+                if elapsed > 10 and current_retry < len(retry_attempts):
+                    retry_delay = retry_attempts[current_retry]
+                    _LOG.info(f"R2 firmware retry {current_retry + 1}: waiting {retry_delay}s for slow-responding devices...")
+                    await asyncio.sleep(retry_delay)
+                    elapsed += retry_delay
+                    current_retry += 1
+                    continue
             
             await asyncio.sleep(check_interval)
             elapsed += check_interval
@@ -161,7 +172,7 @@ class HorizonClient:
             )
             _LOG.warning(
                 f"MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
-                f"devices ready - proceeding anyway (some devices may be offline/slow)"
+                f"devices ready - proceeding anyway (R2 firmware may need more time)"
             )
         else:
             _LOG.error(f"MQTT ready timeout after {timeout}s with NO devices found")
@@ -266,9 +277,17 @@ class HorizonClient:
             if not box:
                 return False
             
-            _LOG.info(f"Powering on device: {device_id}")
+            current_state = getattr(box, 'state', 'unknown')
+            _LOG.info(f"Sending power ON command to {device_id} (current state: {current_state})")
+            
+            if current_state == 'OFFLINE':
+                _LOG.warning(
+                    f"Device {device_id} is OFFLINE - power command may not work. "
+                    f"Box must be in standby (not deep OFF) to receive MQTT commands."
+                )
+            
             await asyncio.to_thread(box.turn_on)
-            _LOG.info("Powered on device: %s", device_id)
+            _LOG.info("Power ON command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to power on %s: %s", device_id, e)
@@ -280,9 +299,9 @@ class HorizonClient:
             if not box:
                 return False
             
-            _LOG.info(f"Powering off device: {device_id}")
+            _LOG.info(f"Sending power OFF command to {device_id}")
             await asyncio.to_thread(box.turn_off)
-            _LOG.info("Powered off device (standby): %s", device_id)
+            _LOG.info("Power OFF command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to power off %s: %s", device_id, e)
@@ -294,9 +313,17 @@ class HorizonClient:
             if not box:
                 return False
             
-            _LOG.info(f"Toggling power on device: {device_id}")
+            current_state = getattr(box, 'state', 'unknown')
+            _LOG.info(f"Sending power TOGGLE command to {device_id} (current state: {current_state})")
+            
+            if current_state == 'OFFLINE':
+                _LOG.warning(
+                    f"Device {device_id} is OFFLINE - toggle command may not work. "
+                    f"Box must be in standby (not deep OFF) to receive MQTT commands."
+                )
+            
             await asyncio.to_thread(box.send_key_to_box, "Power")
-            _LOG.info("Toggled power on device: %s", device_id)
+            _LOG.info("Power TOGGLE command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to toggle power %s: %s", device_id, e)
@@ -464,13 +491,6 @@ class HorizonClient:
             if hasattr(box, "playing_info") and box.playing_info:
                 playing_info = box.playing_info
                 
-                _LOG.warning("========== DIAGNOSTIC: playing_info INSPECTION ==========")
-                _LOG.warning(f"Type: {type(playing_info)}")
-                _LOG.warning(f"Dir: {dir(playing_info)}")
-                _LOG.warning(f"Has __dict__: {hasattr(playing_info, '__dict__')}")
-                if hasattr(playing_info, '__dict__'):
-                    _LOG.warning(f"__dict__: {playing_info.__dict__}")
-                
                 state["channel"] = getattr(playing_info, "channel_title", None)
                 state["media_title"] = getattr(playing_info, "title", None)
                 state["media_image"] = getattr(playing_info, "image", None)
@@ -480,13 +500,6 @@ class HorizonClient:
                 end_snake = getattr(playing_info, "end_time", None)
                 end_camel = getattr(playing_info, "endTime", None)
                 position = getattr(playing_info, "position", None)
-                
-                _LOG.warning(f"start_time (snake_case): {start_snake}")
-                _LOG.warning(f"startTime (camelCase): {start_camel}")
-                _LOG.warning(f"end_time (snake_case): {end_snake}")
-                _LOG.warning(f"endTime (camelCase): {end_camel}")
-                _LOG.warning(f"position: {position}")
-                _LOG.warning("========== END DIAGNOSTIC ==========")
                 
                 state["start_time"] = start_camel or start_snake
                 state["end_time"] = end_camel or end_snake

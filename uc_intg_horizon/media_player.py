@@ -80,7 +80,6 @@ class HorizonMediaPlayer(MediaPlayer):
 
         _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
         
-        # Start background tasks
         asyncio.create_task(self._load_sources())
         asyncio.create_task(self._start_periodic_refresh())
 
@@ -116,6 +115,7 @@ class HorizonMediaPlayer(MediaPlayer):
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
+        is_power_command = False
         is_channel_change = False
 
         try:
@@ -123,11 +123,13 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.info("Media Player: Powering on")
                 await self._client.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
+                is_power_command = True
                 
             elif cmd_id == Commands.OFF:
                 _LOG.info("Media Player: Powering off")
                 await self._client.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.STANDBY
+                is_power_command = True
                 
             elif cmd_id == Commands.TOGGLE:
                 _LOG.info("Media Player: Toggling power")
@@ -137,6 +139,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     self.attributes[Attributes.STATE] = States.STANDBY
                 else:
                     self.attributes[Attributes.STATE] = States.ON
+                is_power_command = True
 
             elif cmd_id == Commands.PLAY_PAUSE:
                 _LOG.info("Media Player: Play/Pause toggle")
@@ -276,7 +279,10 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            if is_channel_change:
+            if is_power_command:
+                _LOG.debug("Power command executed - waiting 3s for MQTT state update...")
+                await asyncio.sleep(3.0)
+            elif is_channel_change:
                 _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
                 await asyncio.sleep(2.0)
             
@@ -321,7 +327,6 @@ class HorizonMediaPlayer(MediaPlayer):
                 
                 duration_seconds = int((end_dt - start_dt).total_seconds())
                 
-                # Clamp position to valid range
                 position_seconds = max(0, min(position_seconds, duration_seconds))
                 
                 _LOG.debug(
@@ -343,23 +348,24 @@ class HorizonMediaPlayer(MediaPlayer):
             device_state = await self._client.get_device_state(self._device_id)
             horizon_state = device_state.get("state", "unavailable")
             
-            # Update power state
+            _LOG.debug(f"Device state for {self._device_id}: {horizon_state}")
+            
             if horizon_state == "ONLINE_RUNNING":
                 self.attributes[Attributes.STATE] = States.PLAYING
             elif horizon_state == "ONLINE_STANDBY":
                 self.attributes[Attributes.STATE] = States.STANDBY
             elif horizon_state == "OFFLINE":
                 self.attributes[Attributes.STATE] = States.OFF
+                _LOG.debug(f"{self.id} - Device is OFF (powered down)")
             else:
                 self.attributes[Attributes.STATE] = States.UNAVAILABLE
+                _LOG.warning(f"{self.id} - Device is UNAVAILABLE (no MQTT communication)")
             
             channel_name = device_state.get("channel", "")
             program_title = device_state.get("media_title", "")
             
             if program_title:
-                # Line 1: Program title (main display)
                 self.attributes[Attributes.MEDIA_TITLE] = program_title
-                # Line 2: Channel name (artist field)
                 self.attributes[Attributes.MEDIA_ARTIST] = channel_name
                 
                 _LOG.debug(
@@ -368,19 +374,15 @@ class HorizonMediaPlayer(MediaPlayer):
                     channel_name
                 )
             elif channel_name:
-                # Only channel available - show on main line
                 self.attributes[Attributes.MEDIA_TITLE] = channel_name
                 self.attributes[Attributes.MEDIA_ARTIST] = ""
             else:
-                # No media info
                 self.attributes[Attributes.MEDIA_TITLE] = ""
                 self.attributes[Attributes.MEDIA_ARTIST] = ""
             
-            # Update artwork
             if device_state.get("media_image"):
                 self.attributes[Attributes.MEDIA_IMAGE_URL] = device_state["media_image"]
             
-            # Update seek bar (position/duration)
             start_time = device_state.get("start_time")
             end_time = device_state.get("end_time")
             position = device_state.get("position")
@@ -397,7 +399,6 @@ class HorizonMediaPlayer(MediaPlayer):
                     (pos / dur * 100) if dur > 0 else 0
                 )
             else:
-                # No timing info - hide seek bar
                 self.attributes[Attributes.MEDIA_POSITION] = 0
                 self.attributes[Attributes.MEDIA_DURATION] = 0
             
