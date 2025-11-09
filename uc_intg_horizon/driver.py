@@ -62,12 +62,17 @@ async def _save_refreshed_token():
 
 
 async def _initialize_integration():
+    """
+    Initialize entities with consistent state handling.
+    
+    KEY PRINCIPLE: If a device has reported ANY state to MQTT (including OFFLINE),
+    it's available for entity creation. Entities can exist even when devices are off.
+    """
     global _config, _client, _media_players, _remotes, api, _entities_ready
     
     async with _initialization_lock:
         if _entities_ready and _client and _client.is_connected:
             _LOG.debug("Entities already initialized and connected")
-            # Update entity states
             for mp in _media_players.values():
                 await mp.push_update()
             for remote in _remotes.values():
@@ -79,7 +84,7 @@ async def _initialize_integration():
             return False
             
         _LOG.info("=" * 70)
-        _LOG.info("=== Starting Entity Initialization (ID Matching Pattern) ===")
+        _LOG.info("=== Starting Entity Initialization ===")
         _LOG.info("=" * 70)
         
         try:
@@ -98,70 +103,69 @@ async def _initialize_integration():
                     return False
                     
                 await _save_refreshed_token()
-                
                 _LOG.info("Connected to Horizon API")
             else:
                 _LOG.info("Already connected to Horizon API")
             
-            _LOG.info("Querying Horizon API for current device states...")
+            _LOG.info("Querying Horizon API for device states...")
             api_devices = await _client.get_devices()
             
-            online_device_map = {}
+            # NEW LOGIC: Any device that has reported a state is available
+            available_device_map = {}
             for device in api_devices:
                 device_id = device["device_id"]
                 device_state = device.get("state", "unknown")
                 
-                if device_state in ["ONLINE_RUNNING", "ONLINE_STANDBY"]:
-                    online_device_map[device_id] = device
-                    _LOG.info(f"API reports ONLINE: {device['name']} (ID: {device_id}) - {device_state}")
+                # If device has ANY state (including OFFLINE), it's available
+                if device_state and device_state != "unavailable":
+                    available_device_map[device_id] = device
+                    _LOG.info(f"✓ Device available: {device['name']} (ID: {device_id}) - State: {device_state}")
                 else:
-                    _LOG.warning(f"API reports OFFLINE: {device['name']} (ID: {device_id}) - {device_state}")
+                    _LOG.warning(f"✗ Device unavailable: {device['name']} (ID: {device_id}) - No MQTT state")
             
-            _LOG.info(f"API Status: {len(online_device_map)}/{len(api_devices)} devices are online")
+            _LOG.info(f"Status: {len(available_device_map)}/{len(api_devices)} devices available")
             
-            _LOG.info(f"Matching {len(_config.devices)} configured device(s) with online devices...")
+            _LOG.info(f"Matching {len(_config.devices)} configured device(s)...")
             
             devices_to_create = []
-            devices_skipped = []
+            devices_not_found = []
             
             for config_device in _config.devices:
                 device_id = config_device["device_id"]
                 device_name = config_device["name"]
                 
-                if device_id in online_device_map:
+                if device_id in available_device_map:
                     devices_to_create.append({
                         "device_id": device_id,
                         "name": device_name,
-                        "state": online_device_map[device_id]["state"]
+                        "state": available_device_map[device_id]["state"]
                     })
-                    _LOG.info(f"  âœ… MATCH: {device_name} (ID: {device_id}) - Will create entities")
+                    _LOG.info(f"  ✓ MATCH: {device_name} (ID: {device_id}) - Will create entities")
                 else:
-                    devices_skipped.append({
+                    devices_not_found.append({
                         "device_id": device_id,
                         "name": device_name
                     })
-                    _LOG.warning(f"NO MATCH: {device_name} (ID: {device_id}) - Device offline or not found")
+                    _LOG.warning(f"  ✗ NOT FOUND: {device_name} (ID: {device_id}) - No MQTT state reported")
             
-            if devices_skipped:
+            if devices_not_found:
                 _LOG.warning("=" * 70)
-                _LOG.warning(f"{len(devices_skipped)} configured device(s) are currently OFFLINE:")
-                for d in devices_skipped:
+                _LOG.warning(f"⚠ {len(devices_not_found)} configured device(s) not found:")
+                for d in devices_not_found:
                     _LOG.warning(f"   - {d['name']} (ID: {d['device_id']})")
-                _LOG.warning("These devices will NOT have entities created until they come online")
-                _LOG.warning("To add them: Power on the box and reconfigure the integration")
+                _LOG.warning("These devices are not reporting to MQTT")
+                _LOG.warning("💡 To fix: Ensure boxes are powered on and connected to network")
                 _LOG.warning("=" * 70)
             
             if not devices_to_create:
-                _LOG.error("No online devices to create entities for!")
-                _LOG.error("All configured devices are currently offline")
+                _LOG.error("No available devices to create entities for!")
+                _LOG.error("All configured devices are not reporting to MQTT")
                 return False
             
-            # Step 5: Additional delay to ensure MQTT is fully stable
             _LOG.info("Waiting additional 2 seconds for MQTT stability...")
             await asyncio.sleep(2)
             
-            # Step 6: Clear and recreate entities ONLY for matched online devices
-            _LOG.info(f"Creating entities for {len(devices_to_create)} matched online device(s)...")
+            _LOG.info(f"Creating entities for {len(devices_to_create)} matched device(s)...")
             api.available_entities.clear()
             _media_players.clear()
             _remotes.clear()
@@ -171,7 +175,7 @@ async def _initialize_integration():
                 device_name = device["name"]
                 device_state = device["state"]
                 
-                _LOG.info(f"  Creating entities for: {device_name} (ID: {device_id}, State: {device_state})")
+                _LOG.info(f"  Creating entities for: {device_name} (State: {device_state})")
                 
                 media_player = HorizonMediaPlayer(
                     device_id=device_id,
@@ -181,7 +185,7 @@ async def _initialize_integration():
                 )
                 _media_players[device_id] = media_player
                 api.available_entities.add(media_player)
-                _LOG.info(f"Created Media Player: {media_player.id}")
+                _LOG.info(f"    ✓ Created Media Player: {media_player.id}")
                 
                 remote = HorizonRemote(
                     device_id=device_id,
@@ -192,16 +196,16 @@ async def _initialize_integration():
                 )
                 _remotes[device_id] = remote
                 api.available_entities.add(remote)
-                _LOG.info(f"    âœ… Created Remote: {remote.id}")
+                _LOG.info(f"    ✓ Created Remote: {remote.id}")
             
             _entities_ready = True
             
             _LOG.info("=" * 70)
-            _LOG.info("Entity initialization complete!")
+            _LOG.info("✓ Entity initialization complete!")
             _LOG.info(f"Summary:")
             _LOG.info(f"   - Media Players created: {len(_media_players)}")
             _LOG.info(f"   - Remotes created: {len(_remotes)}")
-            _LOG.info(f"   - Devices skipped (offline): {len(devices_skipped)}")
+            _LOG.info(f"   - Devices not found: {len(devices_not_found)}")
             _LOG.info("=" * 70)
             
             return True
@@ -256,7 +260,6 @@ async def on_subscribe_entities(entity_ids: list[str]):
     _LOG.info("=== Entity Subscription Request ===")
     _LOG.info(f"Requested entity IDs: {entity_ids}")
     
-    # Race condition protection
     if not _entities_ready:
         _LOG.error("RACE CONDITION DETECTED: Subscription before entities ready!")
         _LOG.info("Attempting emergency initialization...")
@@ -284,7 +287,7 @@ async def on_subscribe_entities(entity_ids: list[str]):
         for device_id, media_player in _media_players.items():
             if entity_id == media_player.id:
                 await media_player.push_update()
-                _LOG.info(f"âœ… Subscribed to media player: {entity_id} (Device ID: {device_id})")
+                _LOG.info(f"  ✓ Subscribed to media player: {entity_id}")
                 matched = True
                 break
         
@@ -292,12 +295,12 @@ async def on_subscribe_entities(entity_ids: list[str]):
             for device_id, remote in _remotes.items():
                 if entity_id == remote.id:
                     await remote.push_update()
-                    _LOG.info(f"Subscribed to remote: {entity_id} (Device ID: {device_id})")
+                    _LOG.info(f"  ✓ Subscribed to remote: {entity_id}")
                     matched = True
                     break
         
         if not matched:
-            _LOG.warning("Entity not found: {entity_id}")
+            _LOG.warning(f"  ✗ Entity not found: {entity_id}")
     
     _LOG.info("=" * 70)
 
@@ -337,10 +340,9 @@ async def main():
             await _initialize_integration()
             
             _LOG.info("=" * 70)
-            _LOG.info("âœ… Pre-initialization complete, entities ready for UC Remote")
+            _LOG.info("✓ Pre-initialization complete, entities ready for UC Remote")
             _LOG.info("=" * 70)
         
-        # Register event handlers
         api.add_listener(Events.CONNECT, on_connect)
         api.add_listener(Events.DISCONNECT, on_disconnect)
         api.add_listener(Events.SUBSCRIBE_ENTITIES, on_subscribe_entities)

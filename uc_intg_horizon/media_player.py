@@ -116,7 +116,6 @@ class HorizonMediaPlayer(MediaPlayer):
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
         is_power_command = False
-        is_channel_change = False
 
         try:
             if cmd_id == Commands.ON:
@@ -158,12 +157,10 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.NEXT:
                 _LOG.info("Media Player: Next channel")
                 await self._client.next_channel(self._device_id)
-                is_channel_change = True
                 
             elif cmd_id == Commands.PREVIOUS:
                 _LOG.info("Media Player: Previous channel")
                 await self._client.previous_channel(self._device_id)
-                is_channel_change = True
                 
             elif cmd_id == Commands.FAST_FORWARD:
                 _LOG.info("Media Player: Fast forward")
@@ -238,12 +235,10 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
                 await self._client.next_channel(self._device_id)
-                is_channel_change = True
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
                 _LOG.info("Media Player: Channel down")
                 await self._client.previous_channel(self._device_id)
-                is_channel_change = True
                 
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
@@ -258,7 +253,6 @@ class HorizonMediaPlayer(MediaPlayer):
                         _LOG.info(f"Launched app: {source}")
                     else:
                         await self._client.set_channel(self._device_id, source)
-                        is_channel_change = True
                     
                     self.attributes[Attributes.SOURCE] = source
                 else:
@@ -273,18 +267,16 @@ class HorizonMediaPlayer(MediaPlayer):
                 channel = cmd_id.split(":", 1)[1]
                 _LOG.info(f"Media Player: Channel select -> {channel}")
                 await self._client.set_channel(self._device_id, channel)
-                is_channel_change = True
 
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
+            # CRITICAL FIX: Only delay for power commands
             if is_power_command:
-                _LOG.debug("Power command executed - waiting 3s for MQTT state update...")
+                _LOG.debug("Power command - waiting 3s for MQTT state update...")
                 await asyncio.sleep(3.0)
-            elif is_channel_change:
-                _LOG.debug("Channel change detected - waiting 2s for MQTT update...")
-                await asyncio.sleep(2.0)
+            # NO DELAY for channel changes - periodic refresh handles updates
             
             await self.push_update()
             return StatusCodes.OK
@@ -324,9 +316,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     end_dt = datetime.fromisoformat(str(end_time))
                 
                 position_seconds = int((now - start_dt).total_seconds())
-                
                 duration_seconds = int((end_dt - start_dt).total_seconds())
-                
                 position_seconds = max(0, min(position_seconds, duration_seconds))
                 
                 _LOG.debug(
@@ -348,18 +338,14 @@ class HorizonMediaPlayer(MediaPlayer):
             device_state = await self._client.get_device_state(self._device_id)
             horizon_state = device_state.get("state", "unavailable")
             
-            _LOG.debug(f"Device state for {self._device_id}: {horizon_state}")
-            
             if horizon_state == "ONLINE_RUNNING":
                 self.attributes[Attributes.STATE] = States.PLAYING
             elif horizon_state == "ONLINE_STANDBY":
                 self.attributes[Attributes.STATE] = States.STANDBY
-            elif horizon_state == "OFFLINE":
+            elif horizon_state in ["OFFLINE", "OFFLINE_NETWORK_STANDBY"]:
                 self.attributes[Attributes.STATE] = States.OFF
-                _LOG.debug(f"{self.id} - Device is OFF (powered down)")
             else:
                 self.attributes[Attributes.STATE] = States.UNAVAILABLE
-                _LOG.warning(f"{self.id} - Device is UNAVAILABLE (no MQTT communication)")
             
             channel_name = device_state.get("channel", "")
             program_title = device_state.get("media_title", "")
