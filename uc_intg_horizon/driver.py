@@ -34,14 +34,20 @@ _entities_ready: bool = False
 _initialization_lock: asyncio.Lock = asyncio.Lock()
 
 
-async def _save_refreshed_token():
+async def _save_refreshed_token(api_instance=None):
     global _config, _client
     
-    if not _client or not _config:
+    if not _config:
+        return
+    
+    if not api_instance and not _client:
         return
     
     try:
-        current_token = getattr(_client._api, 'refresh_token', None)
+        if api_instance:
+            current_token = getattr(api_instance, 'refresh_token', None)
+        else:
+            current_token = getattr(_client._api, 'refresh_token', None)
         
         if current_token and current_token != _config.password:
             _LOG.info("Token was refreshed during connection, updating storage")
@@ -62,12 +68,6 @@ async def _save_refreshed_token():
 
 
 async def _initialize_integration():
-    """
-    Initialize entities with consistent state handling.
-    
-    KEY PRINCIPLE: If a device has reported ANY state to MQTT (including OFFLINE),
-    it's available for entity creation. Entities can exist even when devices are off.
-    """
     global _config, _client, _media_players, _remotes, api, _entities_ready
     
     async with _initialization_lock:
@@ -98,11 +98,10 @@ async def _initialize_integration():
             
             if not _client.is_connected:
                 _LOG.info("Connecting to Horizon API (with MQTT wait)...")
-                if not await _client.connect():
+                if not await _client.connect(token_save_callback=_save_refreshed_token):
                     _LOG.error("Failed to connect to Horizon API")
                     return False
                     
-                await _save_refreshed_token()
                 _LOG.info("Connected to Horizon API")
             else:
                 _LOG.info("Already connected to Horizon API")
@@ -110,18 +109,16 @@ async def _initialize_integration():
             _LOG.info("Querying Horizon API for device states...")
             api_devices = await _client.get_devices()
             
-            # NEW LOGIC: Any device that has reported a state is available
             available_device_map = {}
             for device in api_devices:
                 device_id = device["device_id"]
                 device_state = device.get("state", "unknown")
                 
-                # If device has ANY state (including OFFLINE), it's available
                 if device_state and device_state != "unavailable":
                     available_device_map[device_id] = device
-                    _LOG.info(f"✓ Device available: {device['name']} (ID: {device_id}) - State: {device_state}")
+                    _LOG.info(f"âœ“ Device available: {device['name']} (ID: {device_id}) - State: {device_state}")
                 else:
-                    _LOG.warning(f"✗ Device unavailable: {device['name']} (ID: {device_id}) - No MQTT state")
+                    _LOG.warning(f" Device unavailable: {device['name']} (ID: {device_id}) - No MQTT state")
             
             _LOG.info(f"Status: {len(available_device_map)}/{len(api_devices)} devices available")
             
@@ -140,21 +137,21 @@ async def _initialize_integration():
                         "name": device_name,
                         "state": available_device_map[device_id]["state"]
                     })
-                    _LOG.info(f"  ✓ MATCH: {device_name} (ID: {device_id}) - Will create entities")
+                    _LOG.info(f" MATCH: {device_name} (ID: {device_id}) - Will create entities")
                 else:
                     devices_not_found.append({
                         "device_id": device_id,
                         "name": device_name
                     })
-                    _LOG.warning(f"  ✗ NOT FOUND: {device_name} (ID: {device_id}) - No MQTT state reported")
+                    _LOG.warning(f" NOT FOUND: {device_name} (ID: {device_id}) - No MQTT state reported")
             
             if devices_not_found:
                 _LOG.warning("=" * 70)
-                _LOG.warning(f"⚠ {len(devices_not_found)} configured device(s) not found:")
+                _LOG.warning(f"{len(devices_not_found)} configured device(s) not found:")
                 for d in devices_not_found:
                     _LOG.warning(f"   - {d['name']} (ID: {d['device_id']})")
                 _LOG.warning("These devices are not reporting to MQTT")
-                _LOG.warning("💡 To fix: Ensure boxes are powered on and connected to network")
+                _LOG.warning(" To fix: Ensure boxes are powered on and connected to network")
                 _LOG.warning("=" * 70)
             
             if not devices_to_create:
@@ -185,7 +182,7 @@ async def _initialize_integration():
                 )
                 _media_players[device_id] = media_player
                 api.available_entities.add(media_player)
-                _LOG.info(f"    ✓ Created Media Player: {media_player.id}")
+                _LOG.info(f"  Created Media Player: {media_player.id}")
                 
                 remote = HorizonRemote(
                     device_id=device_id,
@@ -196,12 +193,12 @@ async def _initialize_integration():
                 )
                 _remotes[device_id] = remote
                 api.available_entities.add(remote)
-                _LOG.info(f"    ✓ Created Remote: {remote.id}")
+                _LOG.info(f" Created Remote: {remote.id}")
             
             _entities_ready = True
             
             _LOG.info("=" * 70)
-            _LOG.info("✓ Entity initialization complete!")
+            _LOG.info("Entity initialization complete!")
             _LOG.info(f"Summary:")
             _LOG.info(f"   - Media Players created: {len(_media_players)}")
             _LOG.info(f"   - Remotes created: {len(_remotes)}")
@@ -286,6 +283,7 @@ async def on_subscribe_entities(entity_ids: list[str]):
         
         for device_id, media_player in _media_players.items():
             if entity_id == media_player.id:
+                api.configured_entities.add(media_player)
                 await media_player.push_update()
                 _LOG.info(f"  ✓ Subscribed to media player: {entity_id}")
                 matched = True
@@ -294,6 +292,7 @@ async def on_subscribe_entities(entity_ids: list[str]):
         if not matched:
             for device_id, remote in _remotes.items():
                 if entity_id == remote.id:
+                    api.configured_entities.add(remote)
                     await remote.push_update()
                     _LOG.info(f"  ✓ Subscribed to remote: {entity_id}")
                     matched = True
@@ -340,7 +339,7 @@ async def main():
             await _initialize_integration()
             
             _LOG.info("=" * 70)
-            _LOG.info("✓ Pre-initialization complete, entities ready for UC Remote")
+            _LOG.info("âœ“ Pre-initialization complete, entities ready for UC Remote")
             _LOG.info("=" * 70)
         
         api.add_listener(Events.CONNECT, on_connect)
