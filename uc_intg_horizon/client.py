@@ -11,9 +11,14 @@ import os
 from typing import Any, Callable, Optional
 
 import certifi
+from aiohttp import ClientOSError, ServerTimeoutError, ClientConnectionError
 from lghorizon import LGHorizonApi, LGHorizonBox
 
 _LOG = logging.getLogger(__name__)
+
+# Retry logic for post-firmware wake connection issues
+ERROR_OS_WAIT = 0.5  # Wait time in seconds before retry
+MAX_RETRIES = 2      # Maximum number of retry attempts
 
 PROVIDER_TO_COUNTRY = {
     "Ziggo": "nl",
@@ -473,43 +478,69 @@ class HorizonClient:
             return False
 
     async def get_device_state(self, device_id: str) -> dict[str, Any]:
-        try:
-            box = await self.get_device_by_id(device_id)
-            if not box:
+        """
+        Get device state with retry logic for post-firmware wake connection issues.
+        
+        Implements Apple TV-style retry pattern:
+        - Catches ClientOSError when network isn't ready after wake
+        - Waits ERROR_OS_WAIT seconds (0.5s)
+        - Retries up to MAX_RETRIES times
+        """
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                box = await self.get_device_by_id(device_id)
+                if not box:
+                    return {"state": "unavailable"}
+                
+                state = {
+                    "state": box.state,
+                    "channel": None,
+                    "media_title": None,
+                    "media_image": None,
+                    "start_time": None,
+                    "end_time": None,
+                    "position": None,
+                }
+                
+                # This access to playing_info can trigger API calls that may fail post-wake
+                if hasattr(box, "playing_info") and box.playing_info:
+                    playing_info = box.playing_info
+                    
+                    state["channel"] = getattr(playing_info, "channel_title", None)
+                    state["media_title"] = getattr(playing_info, "title", None)
+                    state["media_image"] = getattr(playing_info, "image", None)
+                    
+                    start_snake = getattr(playing_info, "start_time", None)
+                    start_camel = getattr(playing_info, "startTime", None)
+                    end_snake = getattr(playing_info, "end_time", None)
+                    end_camel = getattr(playing_info, "endTime", None)
+                    position = getattr(playing_info, "position", None)
+                    
+                    state["start_time"] = start_camel or start_snake
+                    state["end_time"] = end_camel or end_snake
+                    state["position"] = position
+                
+                return state
+                
+            except (ClientOSError, ServerTimeoutError, ClientConnectionError) as ex:
+                if attempt < MAX_RETRIES:
+                    _LOG.warning(
+                        f"[{device_id}] Connection error (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                        f"waiting {ERROR_OS_WAIT}s before retry: {type(ex).__name__}"
+                    )
+                    await asyncio.sleep(ERROR_OS_WAIT)
+                    continue
+                else:
+                    _LOG.error(
+                        f"Failed to get state for {device_id} after {MAX_RETRIES + 1} attempts: {ex}"
+                    )
+                    return {"state": "unavailable"}
+                    
+            except Exception as e:
+                _LOG.error("Failed to get state for %s: %s", device_id, e)
                 return {"state": "unavailable"}
-            
-            state = {
-                "state": box.state,
-                "channel": None,
-                "media_title": None,
-                "media_image": None,
-                "start_time": None,
-                "end_time": None,
-                "position": None,
-            }
-            
-            if hasattr(box, "playing_info") and box.playing_info:
-                playing_info = box.playing_info
-                
-                state["channel"] = getattr(playing_info, "channel_title", None)
-                state["media_title"] = getattr(playing_info, "title", None)
-                state["media_image"] = getattr(playing_info, "image", None)
-                
-                start_snake = getattr(playing_info, "start_time", None)
-                start_camel = getattr(playing_info, "startTime", None)
-                end_snake = getattr(playing_info, "end_time", None)
-                end_camel = getattr(playing_info, "endTime", None)
-                position = getattr(playing_info, "position", None)
-                
-                state["start_time"] = start_camel or start_snake
-                state["end_time"] = end_camel or end_snake
-                state["position"] = position
-            
-            return state
-            
-        except Exception as e:
-            _LOG.error("Failed to get state for %s: %s", device_id, e)
-            return {"state": "unavailable"}
+        
+        return {"state": "unavailable"}
 
     @property
     def is_connected(self) -> bool:

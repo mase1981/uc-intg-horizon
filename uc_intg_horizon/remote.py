@@ -102,9 +102,9 @@ class HorizonRemote(Remote):
         asyncio.create_task(self._start_periodic_refresh())
 
     async def _start_periodic_refresh(self):
-        _LOG.info(f"Starting 15-second periodic refresh for remote {self._device_id}")
+        _LOG.info(f"Starting 5-second periodic refresh for remote {self._device_id}")
         
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
         
         while True:
             try:
@@ -112,14 +112,14 @@ class HorizonRemote(Remote):
                     _LOG.debug(f"Periodic refresh triggered for remote {self._device_id}")
                     await self.push_update()
                 
-                await asyncio.sleep(15)
+                await asyncio.sleep(5)
                 
             except asyncio.CancelledError:
                 _LOG.info(f"Periodic refresh stopped for remote {self._device_id}")
                 break
             except Exception as e:
                 _LOG.error(f"Error in periodic refresh for remote {self._device_id}: {e}")
-                await asyncio.sleep(15)
+                await asyncio.sleep(5)
 
     def _create_main_page(self) -> UiPage:
         page = UiPage("main", "Main Control", grid=Size(4, 6))

@@ -93,9 +93,9 @@ class HorizonMediaPlayer(MediaPlayer):
             _LOG.error(f"Failed to load sources: {e}")
 
     async def _start_periodic_refresh(self):
-        _LOG.info(f"Starting 15-second periodic refresh for {self._device_id}")
+        _LOG.info(f"Starting 5-second periodic refresh for {self._device_id}")
         
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
         
         while True:
             try:
@@ -103,14 +103,14 @@ class HorizonMediaPlayer(MediaPlayer):
                     _LOG.debug(f"Periodic refresh triggered for {self._device_id}")
                     await self.push_update()
                 
-                await asyncio.sleep(15)
+                await asyncio.sleep(5)
                 
             except asyncio.CancelledError:
                 _LOG.info(f"Periodic refresh stopped for {self._device_id}")
                 break
             except Exception as e:
                 _LOG.error(f"Error in periodic refresh for {self._device_id}: {e}")
-                await asyncio.sleep(15)
+                await asyncio.sleep(5)
 
     async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
