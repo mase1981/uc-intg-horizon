@@ -7,6 +7,7 @@ Media Player entity for Horizon integration.
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any
 
@@ -272,11 +273,9 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # CRITICAL FIX: Only delay for power commands
             if is_power_command:
                 _LOG.debug("Power command - waiting 3s for MQTT state update...")
                 await asyncio.sleep(3.0)
-            # NO DELAY for channel changes - periodic refresh handles updates
             
             await self.push_update()
             return StatusCodes.OK
@@ -333,6 +332,17 @@ class HorizonMediaPlayer(MediaPlayer):
         
         return (0, 0)
 
+    def _make_unique_image_url(self, base_url: str) -> str:
+        if not base_url:
+            return base_url
+            
+        separator = "&" if "?" in base_url else "?"
+        timestamp = int(time.time() * 1000)
+        unique_url = f"{base_url}{separator}_t={timestamp}"
+        
+        _LOG.debug("Artwork URL: %s -> %s", base_url[:50], unique_url[:70])
+        return unique_url
+
     async def push_update(self) -> None:
         if self._api and self._api.configured_entities.contains(self.id):
             device_state = await self._client.get_device_state(self._device_id)
@@ -367,7 +377,9 @@ class HorizonMediaPlayer(MediaPlayer):
                 self.attributes[Attributes.MEDIA_ARTIST] = ""
             
             if device_state.get("media_image"):
-                self.attributes[Attributes.MEDIA_IMAGE_URL] = device_state["media_image"]
+                original_url = device_state["media_image"]
+                unique_url = self._make_unique_image_url(original_url)
+                self.attributes[Attributes.MEDIA_IMAGE_URL] = unique_url
             
             start_time = device_state.get("start_time")
             end_time = device_state.get("end_time")
