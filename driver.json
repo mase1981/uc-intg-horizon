@@ -1,6 +1,6 @@
 {
   "driver_id": "horizon",
-  "version": "0.5.9",
+  "version": "0.6.2",
 
   "min_core_api": "1.0.0",
   "name": {
