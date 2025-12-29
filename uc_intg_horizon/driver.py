@@ -91,7 +91,7 @@ async def _retry_initialization_with_backoff():
             success = await _initialize_integration()
             
             if success:
-                _LOG.info("âœ" Retry successful! Integration recovered.")
+                _LOG.info("Retry successful! Integration recovered.")
                 await api.set_device_state(DeviceStates.CONNECTED)
                 return
             else:
