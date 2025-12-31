@@ -96,7 +96,7 @@ class HorizonMediaPlayer(MediaPlayer):
     async def _start_periodic_refresh(self):
         _LOG.info(f"Starting 15-second periodic refresh for {self._device_id}")
         
-        await asyncio.sleep(5)
+        await asyncio.sleep(15)
         
         while True:
             try:
@@ -117,6 +117,7 @@ class HorizonMediaPlayer(MediaPlayer):
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
         is_power_command = False
+        is_channel_command = False
 
         try:
             if cmd_id == Commands.ON:
@@ -158,10 +159,12 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.NEXT:
                 _LOG.info("Media Player: Next channel")
                 await self._client.next_channel(self._device_id)
+                is_channel_command = True
                 
             elif cmd_id == Commands.PREVIOUS:
                 _LOG.info("Media Player: Previous channel")
                 await self._client.previous_channel(self._device_id)
+                is_channel_command = True
                 
             elif cmd_id == Commands.FAST_FORWARD:
                 _LOG.info("Media Player: Fast forward")
@@ -236,10 +239,12 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.CHANNEL_UP:
                 _LOG.info("Media Player: Channel up")
                 await self._client.next_channel(self._device_id)
+                is_channel_command = True
                 
             elif cmd_id == Commands.CHANNEL_DOWN:
                 _LOG.info("Media Player: Channel down")
                 await self._client.previous_channel(self._device_id)
+                is_channel_command = True
                 
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
@@ -254,6 +259,7 @@ class HorizonMediaPlayer(MediaPlayer):
                         _LOG.info(f"Launched app: {source}")
                     else:
                         await self._client.set_channel(self._device_id, source)
+                        is_channel_command = True
                     
                     self.attributes[Attributes.SOURCE] = source
                 else:
@@ -268,6 +274,7 @@ class HorizonMediaPlayer(MediaPlayer):
                 channel = cmd_id.split(":", 1)[1]
                 _LOG.info(f"Media Player: Channel select -> {channel}")
                 await self._client.set_channel(self._device_id, channel)
+                is_channel_command = True
 
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
@@ -276,6 +283,9 @@ class HorizonMediaPlayer(MediaPlayer):
             if is_power_command:
                 _LOG.debug("Power command - waiting 3s for MQTT state update...")
                 await asyncio.sleep(3.0)
+            elif is_channel_command:
+                _LOG.debug("Channel command - waiting 2.5s for MQTT state update...")
+                await asyncio.sleep(2.5)
             
             await self.push_update()
             return StatusCodes.OK
@@ -333,6 +343,15 @@ class HorizonMediaPlayer(MediaPlayer):
         return (0, 0)
 
     def _make_unique_image_url(self, base_url: str) -> str:
+        """
+        Add unique query parameter to image URL to force refresh in R3 firmware.
+        
+        R3 firmware requires unique URLs for artwork to refresh properly.
+        We append a timestamp-based dummy parameter to make each URL unique.
+        
+        :param base_url: Original image URL
+        :return: URL with unique query parameter
+        """
         if not base_url:
             return base_url
             
