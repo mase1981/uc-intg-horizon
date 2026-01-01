@@ -32,6 +32,7 @@ class HorizonMediaPlayer(MediaPlayer):
         self._client = client
         self._api = api
         self._refresh_task = None
+        self._channel_update_task = None
 
         features = [
             Features.ON_OFF,
@@ -280,19 +281,42 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
+            # Power commands: immediate state update (need instant feedback)
             if is_power_command:
-                _LOG.debug("Power command - waiting 3s for MQTT state update...")
+                _LOG.debug("Power command - waiting 3s for MQTT, then updating state")
                 await asyncio.sleep(3.0)
-            elif is_channel_command:
-                _LOG.debug("Channel command - waiting 2.5s for MQTT state update...")
-                await asyncio.sleep(2.5)
+                await self.push_update()
             
-            await self.push_update()
+            # Channel commands: schedule background update (don't block user)
+            elif is_channel_command:
+                _LOG.debug("Channel command - scheduling background artwork update")
+                if self._channel_update_task and not self._channel_update_task.done():
+                    self._channel_update_task.cancel()
+                self._channel_update_task = asyncio.create_task(self._delayed_channel_update())
+            
+            # Other commands: no update (periodic refresh handles it)
+            
             return StatusCodes.OK
 
         except Exception as e:
             _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
             return StatusCodes.SERVER_ERROR
+
+    async def _delayed_channel_update(self):
+        """
+        Background task to update artwork after channel change.
+        Waits for MQTT to propagate new channel state, then refreshes.
+        """
+        try:
+            _LOG.debug("Delayed channel update: waiting 2.5s for MQTT propagation...")
+            await asyncio.sleep(2.5)
+            _LOG.debug("Delayed channel update: fetching new artwork")
+            await self.push_update()
+        except asyncio.CancelledError:
+            _LOG.debug("Delayed channel update cancelled (new channel command)")
+            raise
+        except Exception as e:
+            _LOG.error("Error in delayed channel update: %s", e)
 
     def _calculate_position_duration(self, start_time, end_time, position=None):
         try:

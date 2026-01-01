@@ -69,6 +69,12 @@ async def _save_refreshed_token(api_instance=None):
 
 
 async def _retry_initialization_with_backoff():
+    """
+    Retry initialization with exponential backoff for network failures.
+    
+    This background task ensures the integration recovers from transient
+    network issues (DNS failures, timeouts) without requiring user intervention.
+    """
     global _entities_ready, api
     
     retry_delays = [5, 10, 20, 30, 60, 120, 300]
@@ -91,7 +97,7 @@ async def _retry_initialization_with_backoff():
             success = await _initialize_integration()
             
             if success:
-                _LOG.info("Retry successful! Integration recovered.")
+                _LOG.info("âœ" Retry successful! Integration recovered.")
                 await api.set_device_state(DeviceStates.CONNECTED)
                 return
             else:
