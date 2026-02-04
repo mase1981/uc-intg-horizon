@@ -8,6 +8,7 @@ Horizon API client for device communication.
 import asyncio
 import logging
 import os
+import ssl
 from typing import Any, Callable, Optional
 
 import aiohttp
@@ -69,8 +70,12 @@ class HorizonClient:
             _LOG.info("Connecting to Horizon API: provider=%s, username=%s",
                      self.provider, self.username)
 
-            # Create aiohttp session
-            self._session = aiohttp.ClientSession()
+            # Create SSL context with certifi certificates
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+            # Create aiohttp session with SSL context
+            self._session = aiohttp.ClientSession(connector=connector)
 
             # Create auth object with new API
             country = self.country_code[0:2]
