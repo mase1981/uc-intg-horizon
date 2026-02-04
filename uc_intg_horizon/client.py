@@ -10,8 +10,9 @@ import logging
 import os
 from typing import Any, Callable, Optional
 
+import aiohttp
 import certifi
-from lghorizon import LGHorizonApi, LGHorizonDevice
+from lghorizon import LGHorizonApi, LGHorizonAuth, LGHorizonDevice
 
 _LOG = logging.getLogger(__name__)
 
@@ -51,83 +52,99 @@ class HorizonClient:
         self.username = username
         self.password = password
         self._api: Optional[LGHorizonApi] = None
+        self._auth: Optional[LGHorizonAuth] = None
+        self._session: Optional[aiohttp.ClientSession] = None
         self._connected = False
-        
+
         self.country_code = PROVIDER_TO_COUNTRY.get(provider, "nl")
-        
+
         os.environ['SSL_CERT_FILE'] = certifi.where()
         os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
-        
+
         _LOG.info(f"Horizon client initialized: provider={provider}, country_code={self.country_code}")
         _LOG.info(f"SSL certificate bundle: {certifi.where()}")
 
     async def connect(self, token_save_callback: Optional[Callable] = None) -> bool:
         try:
-            _LOG.info("Connecting to Horizon API: provider=%s, username=%s", 
+            _LOG.info("Connecting to Horizon API: provider=%s, username=%s",
                      self.provider, self.username)
-            
+
+            # Create aiohttp session
+            self._session = aiohttp.ClientSession()
+
+            # Create auth object with new API
             country = self.country_code[0:2]
             if country in ("gb", "ch", "be"):
                 _LOG.info("Using refresh token authentication for %s", country.upper())
-                self._api = LGHorizonApi(
-                    username=self.username,
-                    password="",
+                self._auth = LGHorizonAuth(
+                    websession=self._session,
                     country_code=self.country_code,
                     refresh_token=self.password,
+                    username=self.username,
+                    password="",
                 )
             else:
-                self._api = LGHorizonApi(
+                self._auth = LGHorizonAuth(
+                    websession=self._session,
+                    country_code=self.country_code,
                     username=self.username,
                     password=self.password,
-                    country_code=self.country_code,
                 )
-            
-            await asyncio.to_thread(self._api.connect)
-            
+
+            # Create API with auth
+            self._api = LGHorizonApi(auth=self._auth, profile_id="")
+
+            # Initialize API (replaces old connect())
+            await self._api.initialize()
+
             if token_save_callback:
                 _LOG.debug("Invoking token save callback immediately after API connection")
                 try:
-                    await token_save_callback(self._api)
+                    await token_save_callback(self._auth)
                 except Exception as e:
                     _LOG.error("Token save callback failed: %s", e, exc_info=True)
                     _LOG.warning("Continuing despite callback failure - fallback saves will handle it")
-            
+
             await self._wait_for_mqtt_ready()
-            
+
             self._connected = True
-            device_count = len(self._api.settop_boxes)
+            devices = await self._api.get_devices()
+            device_count = len(devices)
             _LOG.info("Connected to Horizon API successfully. Devices found: %d", device_count)
-            
-            if hasattr(self._api, 'refresh_token') and self._api.refresh_token:
-                _LOG.debug("Current refresh token: %s...", self._api.refresh_token[:20])
-            
+
+            if hasattr(self._auth, 'refresh_token') and self._auth.refresh_token:
+                _LOG.debug("Current refresh token: %s...", self._auth.refresh_token[:20])
+
             return True
-            
+
         except Exception as e:
             _LOG.error("Failed to connect to Horizon API: %s", e, exc_info=True)
             self._connected = False
+            if self._session:
+                await self._session.close()
             return False
 
 
     async def _wait_for_mqtt_ready(self, timeout: int = 25, check_interval: float = 0.5):
         if not self._api:
             return
-        
+
         elapsed = 0
         retry_attempts = [3, 5, 8]
         current_retry = 0
-        
+
         _LOG.debug("Waiting for devices to register on MQTT (R2 firmware-aware)...")
-        
+
         while elapsed < timeout:
-            if hasattr(self._api, 'settop_boxes') and len(self._api.settop_boxes) > 0:
-                total_devices = len(self._api.settop_boxes)
+            devices = await self._api.get_devices()
+            if len(devices) > 0:
+                total_devices = len(devices)
                 ready_devices = 0
                 online_devices = 0
                 offline_devices = 0
                 pending_devices = []
-                
-                for device_id, box in self._api.settop_boxes.items():
+
+                for device_id, box in devices.items():
                     if hasattr(box, 'state') and box.state is not None:
                         ready_devices += 1
                         if box.state == 'OFFLINE':
@@ -139,7 +156,7 @@ class HorizonClient:
                     else:
                         pending_devices.append(device_id)
                         _LOG.debug(f"Device {device_id} not ready yet (no state)")
-                
+
                 if ready_devices > 0:
                     _LOG.info(
                         f"MQTT ready: {ready_devices}/{total_devices} devices reported state "
@@ -148,7 +165,7 @@ class HorizonClient:
                     if pending_devices:
                         _LOG.info(f"Proceeding with {len(pending_devices)} devices still pending: {pending_devices}")
                     return
-                
+
                 if elapsed > 10 and current_retry < len(retry_attempts):
                     retry_delay = retry_attempts[current_retry]
                     _LOG.info(f"R2 firmware retry {current_retry + 1}: waiting {retry_delay}s for slow-responding devices...")
@@ -156,18 +173,19 @@ class HorizonClient:
                     elapsed += retry_delay
                     current_retry += 1
                     continue
-            
+
             await asyncio.sleep(check_interval)
             elapsed += check_interval
-            
+
             if int(elapsed) % 5 == 0:
-                device_count = len(self._api.settop_boxes) if hasattr(self._api, 'settop_boxes') else 0
+                device_count = len(await self._api.get_devices())
                 _LOG.debug(f"Still waiting for MQTT ready... ({elapsed:.1f}s elapsed, {device_count} devices found)")
-        
-        device_count = len(self._api.settop_boxes) if hasattr(self._api, 'settop_boxes') else 0
+
+        devices = await self._api.get_devices()
+        device_count = len(devices)
         if device_count > 0:
             ready_count = sum(
-                1 for box in self._api.settop_boxes.values() 
+                1 for box in devices.values()
                 if hasattr(box, 'state') and box.state is not None
             )
             _LOG.warning(
@@ -180,8 +198,8 @@ class HorizonClient:
 
     async def disconnect(self) -> None:
         try:
-            if self._api:
-                await asyncio.to_thread(self._api.disconnect)
+            if self._session and not self._session.closed:
+                await self._session.close()
             self._connected = False
             _LOG.info("Disconnected from Horizon API")
         except Exception as e:
@@ -191,13 +209,14 @@ class HorizonClient:
         if not self._connected or not self._api:
             _LOG.warning("Not connected to Horizon API")
             return []
-        
+
         devices = []
         box: LGHorizonDevice
-        for device_id, box in self._api.settop_boxes.items():
+        api_devices = await self._api.get_devices()
+        for device_id, box in api_devices.items():
             try:
                 device_name = getattr(box, "device_friendly_name", device_id)
-                
+
                 devices.append({
                     "device_id": device_id,
                     "name": device_name,
@@ -207,14 +226,15 @@ class HorizonClient:
                 })
             except Exception as e:
                 _LOG.error("Error processing device: %s", e)
-        
+
         return devices
 
     async def get_device_by_id(self, device_id: str) -> Optional[LGHorizonDevice]:
         if not self._api:
             return None
-            
-        return self._api.settop_boxes.get(device_id)
+
+        devices = await self._api.get_devices()
+        return devices.get(device_id)
 
     async def get_sources(self, device_id: str) -> list[dict[str, str]]:
         sources = []
