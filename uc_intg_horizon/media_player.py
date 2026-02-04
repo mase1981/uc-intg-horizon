@@ -27,10 +27,12 @@ class HorizonMediaPlayer(MediaPlayer):
         device_name: str,
         client: HorizonClient,
         api,
+        sensors: list = None,
     ):
         self._device_id = device_id
         self._client = client
         self._api = api
+        self._sensors = sensors or []
         self._refresh_task = None
         self._channel_update_task = None
 
@@ -58,6 +60,7 @@ class HorizonMediaPlayer(MediaPlayer):
             Features.MEDIA_ARTIST,
             Features.MEDIA_IMAGE_URL,
             Features.MEDIA_POSITION,
+            Features.SEEK,
         ]
 
         attributes = {
@@ -178,6 +181,18 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.RECORD:
                 _LOG.info("Media Player: Record -> MediaRecord")
                 await self._client.send_key(self._device_id, "MediaRecord")
+
+            elif cmd_id == Commands.SEEK:
+                if params and "media_position" in params:
+                    position_seconds = params["media_position"]
+                    _LOG.info(f"Media Player: Seek to position {position_seconds}s")
+                    success = await self._client.seek(self._device_id, position_seconds)
+                    if success:
+                        self.attributes[Attributes.MEDIA_POSITION] = int(position_seconds)
+                    return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
+                else:
+                    _LOG.warning("SEEK called without media_position parameter")
+                    return StatusCodes.BAD_REQUEST
 
             elif cmd_id == Commands.VOLUME_UP:
                 _LOG.info("Media Player: Volume up -> VolumeUp")
@@ -445,3 +460,6 @@ class HorizonMediaPlayer(MediaPlayer):
             
             self._api.configured_entities.update_attributes(self.id, self.attributes)
             _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])
+
+            for sensor in self._sensors:
+                await sensor.update_state(device_state)

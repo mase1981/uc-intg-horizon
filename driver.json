@@ -1,6 +1,6 @@
 {
   "driver_id": "horizon",
-  "version": "0.6.6",
+  "version": "2.0.0",
 
   "min_core_api": "1.0.0",
   "name": {
@@ -20,9 +20,8 @@
   },
   "home_page": "https://github.com/mase1981/uc-intg-horizon",
   "documentation": "https://github.com/mase1981/uc-intg-horizon/blob/main/README.md",
-  "release_date": "2025-01-19",
+  "release_date": "2025-02-04",
   "icon": "uc:tv",
-  "port": 9091,
   "setup_data_schema": {
     "title": {
       "en": "LG Horizon Setup",

@@ -15,6 +15,11 @@ from uc_intg_horizon.client import HorizonClient
 from uc_intg_horizon.config import HorizonConfig
 from uc_intg_horizon.media_player import HorizonMediaPlayer
 from uc_intg_horizon.remote import HorizonRemote
+from uc_intg_horizon.sensor import (
+    HorizonChannelSensor,
+    HorizonDeviceStateSensor,
+    HorizonProgramSensor,
+)
 from uc_intg_horizon.setup_manager import SetupManager
 
 logging.basicConfig(
@@ -30,6 +35,7 @@ _client: HorizonClient | None = None
 _setup_manager: SetupManager | None = None
 _media_players: dict[str, HorizonMediaPlayer] = {}
 _remotes: dict[str, HorizonRemote] = {}
+_sensors: dict[str, list] = {}
 _entities_ready: bool = False
 _initialization_lock: asyncio.Lock = asyncio.Lock()
 _retry_task: asyncio.Task | None = None
@@ -113,7 +119,7 @@ async def _retry_initialization_with_backoff():
 
 
 async def _initialize_integration():
-    global _config, _client, _media_players, _remotes, api, _entities_ready
+    global _config, _client, _media_players, _remotes, _sensors, api, _entities_ready
     
     async with _initialization_lock:
         if _entities_ready and _client and _client.is_connected:
@@ -211,24 +217,50 @@ async def _initialize_integration():
             api.available_entities.clear()
             _media_players.clear()
             _remotes.clear()
-            
+            _sensors.clear()
+
             for device in devices_to_create:
                 device_id = device["device_id"]
                 device_name = device["name"]
                 device_state = device["state"]
-                
+
                 _LOG.info(f"  Creating entities for: {device_name} (State: {device_state})")
-                
-                media_player = HorizonMediaPlayer(
+
+                device_state_sensor = HorizonDeviceStateSensor(
                     device_id=device_id,
                     device_name=device_name,
                     client=_client,
                     api=api,
                 )
+
+                channel_sensor = HorizonChannelSensor(
+                    device_id=device_id,
+                    device_name=device_name,
+                    client=_client,
+                    api=api,
+                )
+
+                program_sensor = HorizonProgramSensor(
+                    device_id=device_id,
+                    device_name=device_name,
+                    client=_client,
+                    api=api,
+                )
+
+                device_sensors = [device_state_sensor, channel_sensor, program_sensor]
+                _sensors[device_id] = device_sensors
+
+                media_player = HorizonMediaPlayer(
+                    device_id=device_id,
+                    device_name=device_name,
+                    client=_client,
+                    api=api,
+                    sensors=device_sensors,
+                )
                 _media_players[device_id] = media_player
                 api.available_entities.add(media_player)
                 _LOG.info(f"  ✓ Created Media Player: {media_player.id}")
-                
+
                 remote = HorizonRemote(
                     device_id=device_id,
                     device_name=device_name,
@@ -239,6 +271,14 @@ async def _initialize_integration():
                 _remotes[device_id] = remote
                 api.available_entities.add(remote)
                 _LOG.info(f"  ✓ Created Remote: {remote.id}")
+
+                api.available_entities.add(device_state_sensor)
+                api.available_entities.add(channel_sensor)
+                api.available_entities.add(program_sensor)
+
+                _LOG.info(f"  ✓ Created Sensor: {device_state_sensor.id}")
+                _LOG.info(f"  ✓ Created Sensor: {channel_sensor.id}")
+                _LOG.info(f"  ✓ Created Sensor: {program_sensor.id}")
             
             _entities_ready = True
             
@@ -247,6 +287,7 @@ async def _initialize_integration():
             _LOG.info(f"Summary:")
             _LOG.info(f"   - Media Players created: {len(_media_players)}")
             _LOG.info(f"   - Remotes created: {len(_remotes)}")
+            _LOG.info(f"   - Sensors created: {sum(len(sensors) for sensors in _sensors.values())}")
             _LOG.info(f"   - Devices not found: {len(devices_not_found)}")
             _LOG.info("=" * 70)
             
@@ -326,12 +367,15 @@ async def on_subscribe_entities(entity_ids: list[str]):
         available_ids.append(mp.id)
     for device_id, remote in _remotes.items():
         available_ids.append(remote.id)
-    
+    for device_id, sensors in _sensors.items():
+        for sensor in sensors:
+            available_ids.append(sensor.id)
+
     _LOG.info(f"Available entity IDs: {available_ids}")
-    
+
     for entity_id in entity_ids:
         matched = False
-        
+
         for device_id, media_player in _media_players.items():
             if entity_id == media_player.id:
                 api.configured_entities.add(media_player)
@@ -339,7 +383,7 @@ async def on_subscribe_entities(entity_ids: list[str]):
                 _LOG.info(f"  ✓ Subscribed to media player: {entity_id}")
                 matched = True
                 break
-        
+
         if not matched:
             for device_id, remote in _remotes.items():
                 if entity_id == remote.id:
@@ -348,7 +392,20 @@ async def on_subscribe_entities(entity_ids: list[str]):
                     _LOG.info(f"  ✓ Subscribed to remote: {entity_id}")
                     matched = True
                     break
-        
+
+        if not matched:
+            for device_id, sensors in _sensors.items():
+                for sensor in sensors:
+                    if entity_id == sensor.id:
+                        api.configured_entities.add(sensor)
+                        device_state = await _client.get_device_state(device_id)
+                        await sensor.update_state(device_state)
+                        _LOG.info(f"  ✓ Subscribed to sensor: {entity_id}")
+                        matched = True
+                        break
+                if matched:
+                    break
+
         if not matched:
             _LOG.warning(f"  ✗ Entity not found: {entity_id}")
     

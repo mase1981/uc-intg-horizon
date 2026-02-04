@@ -24,8 +24,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "ucapi>=0.3.1",
-    "lghorizon>=0.8.6",
+    "ucapi>=0.5.2",
+    "lghorizon>=0.9.1",
     "aiohttp>=3.9.0",
     "certifi",
 ]

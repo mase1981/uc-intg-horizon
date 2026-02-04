@@ -416,12 +416,33 @@ class HorizonClient:
             box = await self.get_device_by_id(device_id)
             if not box:
                 return False
-            
+
             await asyncio.to_thread(box.record)
             _LOG.debug("Record command sent to %s", device_id)
             return True
         except Exception as e:
             _LOG.error("Failed to record on %s: %s", device_id, e)
+            return False
+
+    async def seek(self, device_id: str, position_seconds: float) -> bool:
+        try:
+            box = await self.get_device_by_id(device_id)
+            if not box:
+                return False
+
+            position_ms = int(position_seconds * 1000)
+            _LOG.info(f"Seeking to {position_seconds}s ({position_ms}ms) on device: {device_id}")
+
+            if hasattr(box, 'set_player_position'):
+                await asyncio.to_thread(box.set_player_position, position_ms)
+                _LOG.debug("Seek command sent to %s: %dms", device_id, position_ms)
+                return True
+            else:
+                _LOG.warning("Device %s does not support seeking (set_player_position not available)", device_id)
+                return False
+
+        except Exception as e:
+            _LOG.error("Failed to seek on %s: %s", device_id, e)
             return False
 
     async def next_channel(self, device_id: str) -> bool:
