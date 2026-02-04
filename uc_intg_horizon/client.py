@@ -11,7 +11,7 @@ import os
 from typing import Any, Callable, Optional
 
 import certifi
-from lghorizon import LGHorizonApi, LGHorizonBox
+from lghorizon import LGHorizonApi, LGHorizonDevice
 
 _LOG = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ class HorizonClient:
             return []
         
         devices = []
-        box: LGHorizonBox
+        box: LGHorizonDevice
         for device_id, box in self._api.settop_boxes.items():
             try:
                 device_name = getattr(box, "device_friendly_name", device_id)
@@ -210,7 +210,7 @@ class HorizonClient:
         
         return devices
 
-    async def get_device_by_id(self, device_id: str) -> Optional[LGHorizonBox]:
+    async def get_device_by_id(self, device_id: str) -> Optional[LGHorizonDevice]:
         if not self._api:
             return None
             
