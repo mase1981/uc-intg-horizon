@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 import aiohttp
 import certifi
-from lghorizon import LGHorizonApi, LGHorizonAuth, LGHorizonDevice
+from lghorizon import LGHorizonApi, LGHorizonAuth, LGHorizonDevice, LGHorizonRunningState
 
 _LOG = logging.getLogger(__name__)
 
@@ -150,14 +150,15 @@ class HorizonClient:
                 pending_devices = []
 
                 for device_id, box in devices.items():
-                    if hasattr(box, 'state') and box.state is not None:
+                    if hasattr(box, 'device_state') and box.device_state is not None:
+                        state = box.device_state.state
                         ready_devices += 1
-                        if box.state == 'OFFLINE':
+                        if state == LGHorizonRunningState.UNKNOWN:
                             offline_devices += 1
-                            _LOG.debug(f"Device {device_id} is OFFLINE")
+                            _LOG.debug(f"Device {device_id} is UNKNOWN/OFFLINE")
                         else:
                             online_devices += 1
-                            _LOG.debug(f"Device {device_id} is {box.state}")
+                            _LOG.debug(f"Device {device_id} is {state.value}")
                     else:
                         pending_devices.append(device_id)
                         _LOG.debug(f"Device {device_id} not ready yet (no state)")
@@ -191,7 +192,7 @@ class HorizonClient:
         if device_count > 0:
             ready_count = sum(
                 1 for box in devices.values()
-                if hasattr(box, 'state') and box.state is not None
+                if hasattr(box, 'device_state') and box.device_state is not None
             )
             _LOG.warning(
                 f"MQTT ready timeout after {timeout}s with {ready_count}/{device_count} "
@@ -222,11 +223,16 @@ class HorizonClient:
             try:
                 device_name = getattr(box, "device_friendly_name", device_id)
 
+                # Get state value from device_state
+                state_value = "UNKNOWN"
+                if hasattr(box, 'device_state') and box.device_state is not None:
+                    state_value = box.device_state.state.value
+
                 devices.append({
                     "device_id": device_id,
                     "name": device_name,
                     "model": getattr(box, "model", "Unknown"),
-                    "state": box.state,
+                    "state": state_value,
                     "manufacturer": getattr(box, "manufacturer", "LG"),
                 })
             except Exception as e:
@@ -523,9 +529,14 @@ class HorizonClient:
             box = await self.get_device_by_id(device_id)
             if not box:
                 return {"state": "unavailable"}
-            
+
+            # Get state value
+            state_value = "unavailable"
+            if hasattr(box, 'device_state') and box.device_state is not None:
+                state_value = box.device_state.state.value
+
             state = {
-                "state": box.state,
+                "state": state_value,
                 "channel": None,
                 "media_title": None,
                 "media_image": None,
@@ -533,26 +544,20 @@ class HorizonClient:
                 "end_time": None,
                 "position": None,
             }
-            
-            if hasattr(box, "playing_info") and box.playing_info:
-                playing_info = box.playing_info
-                
-                state["channel"] = getattr(playing_info, "channel_title", None)
-                state["media_title"] = getattr(playing_info, "title", None)
-                state["media_image"] = getattr(playing_info, "image", None)
-                
-                start_snake = getattr(playing_info, "start_time", None)
-                start_camel = getattr(playing_info, "startTime", None)
-                end_snake = getattr(playing_info, "end_time", None)
-                end_camel = getattr(playing_info, "endTime", None)
-                position = getattr(playing_info, "position", None)
-                
-                state["start_time"] = start_camel or start_snake
-                state["end_time"] = end_camel or end_snake
-                state["position"] = position
-            
+
+            # Get media info from device_state
+            if hasattr(box, "device_state") and box.device_state:
+                device_state = box.device_state
+
+                state["channel"] = getattr(device_state, "channel_name", None)
+                state["media_title"] = getattr(device_state, "show_title", None)
+                state["media_image"] = getattr(device_state, "image", None)
+                state["start_time"] = getattr(device_state, "start_time", None)
+                state["end_time"] = getattr(device_state, "end_time", None)
+                state["position"] = getattr(device_state, "position", None)
+
             return state
-            
+
         except Exception as e:
             _LOG.error("Failed to get state for %s: %s", device_id, e)
             return {"state": "unavailable"}
