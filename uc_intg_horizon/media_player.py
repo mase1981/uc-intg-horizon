@@ -60,7 +60,7 @@ class HorizonMediaPlayer(MediaPlayer):
             Features.MEDIA_ARTIST,
             Features.MEDIA_IMAGE_URL,
             Features.MEDIA_POSITION,
-            Features.SEEK,
+            # Features.SEEK,  # Disabled - requires lghorizon 0.9.1+ (currently beta)
         ]
 
         attributes = {
@@ -182,17 +182,18 @@ class HorizonMediaPlayer(MediaPlayer):
                 _LOG.info("Media Player: Record -> MediaRecord")
                 await self._client.send_key(self._device_id, "MediaRecord")
 
-            elif cmd_id == Commands.SEEK:
-                if params and "media_position" in params:
-                    position_seconds = params["media_position"]
-                    _LOG.info(f"Media Player: Seek to position {position_seconds}s")
-                    success = await self._client.seek(self._device_id, position_seconds)
-                    if success:
-                        self.attributes[Attributes.MEDIA_POSITION] = int(position_seconds)
-                    return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
-                else:
-                    _LOG.warning("SEEK called without media_position parameter")
-                    return StatusCodes.BAD_REQUEST
+            # SEEK disabled - requires lghorizon 0.9.1+ (currently beta)
+            # elif cmd_id == Commands.SEEK:
+            #     if params and "media_position" in params:
+            #         position_seconds = params["media_position"]
+            #         _LOG.info(f"Media Player: Seek to position {position_seconds}s")
+            #         success = await self._client.seek(self._device_id, position_seconds)
+            #         if success:
+            #             self.attributes[Attributes.MEDIA_POSITION] = int(position_seconds)
+            #         return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
+            #     else:
+            #         _LOG.warning("SEEK called without media_position parameter")
+            #         return StatusCodes.BAD_REQUEST
 
             elif cmd_id == Commands.VOLUME_UP:
                 _LOG.info("Media Player: Volume up -> VolumeUp")
