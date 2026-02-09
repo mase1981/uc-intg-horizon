@@ -18,7 +18,7 @@ _LOG = logging.getLogger(__name__)
 PROVIDER_TO_COUNTRY = {
     "Ziggo": "nl",
     "VirginMedia": "gb",
-    "Telenet": "be",
+    "Telenet": "be-nl",
     "UPC": "ch",
     "Sunrise": "ch",
     "Magenta": "at",
