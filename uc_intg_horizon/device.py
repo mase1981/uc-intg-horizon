@@ -1,5 +1,5 @@
 """
-Horizon device wrapper using lghorizon 0.9.11 API.
+Horizon device wrapper using lghorizon 0.9.11 API with ucapi-framework.
 
 :copyright: (c) 2025 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
@@ -10,12 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from enum import StrEnum
 from typing import Any
 
 import aiohttp
 import certifi
-from pyee.asyncio import AsyncIOEventEmitter
 
 from lghorizon import (
     COUNTRY_SETTINGS,
@@ -24,6 +22,7 @@ from lghorizon import (
     LGHorizonDevice as LGDevice,
     LGHorizonRunningState,
 )
+from ucapi_framework.device import ExternalClientDevice, DeviceEvents
 
 from uc_intg_horizon.config import HorizonConfig
 
@@ -38,170 +37,142 @@ PROVIDER_TO_COUNTRY = {
 }
 
 
-class DeviceEvents(StrEnum):
-    """Device event types for ucapi-framework integration."""
-
-    CONNECTING = "DEVICE_CONNECTING"
-    CONNECTED = "DEVICE_CONNECTED"
-    DISCONNECTED = "DEVICE_DISCONNECTED"
-    ERROR = "DEVICE_ERROR"
-    UPDATE = "DEVICE_UPDATE"
-
-
-class HorizonDevice:
+class HorizonDevice(ExternalClientDevice):
     """
-    Wrapper for lghorizon 0.9.11 API with ucapi-framework event support.
+    Wrapper for lghorizon 0.9.11 API using ucapi-framework ExternalClientDevice.
 
-    Uses ExternalClientDevice pattern - lghorizon manages its own MQTT connection.
-    Emits events for state changes that entities can subscribe to.
+    lghorizon manages its own MQTT connection for state updates.
+    The watchdog monitors connection health and triggers reconnection if needed.
     """
 
-    def __init__(self, config: HorizonConfig) -> None:
+    def __init__(self, device_config: HorizonConfig) -> None:
         """Initialize the Horizon device wrapper."""
-        self._config = config
+        super().__init__(
+            device_config=device_config,
+            enable_watchdog=True,
+            watchdog_interval=60,
+            reconnect_delay=10,
+            max_reconnect_attempts=0,
+        )
+
         self._session: aiohttp.ClientSession | None = None
         self._auth: LGHorizonAuth | None = None
         self._api: LGHorizonApi | None = None
-        self._devices: dict[str, LGDevice] = {}
-        self._connected = False
-        self._reconnect_task: asyncio.Task | None = None
-
-        self.events = AsyncIOEventEmitter()
+        self._lg_devices: dict[str, LGDevice] = {}
 
         os.environ["SSL_CERT_FILE"] = certifi.where()
         os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-        self._country_code = PROVIDER_TO_COUNTRY.get(config.provider, "nl")
+        self._country_code = PROVIDER_TO_COUNTRY.get(device_config.provider, "nl")
         _LOG.info(
             "HorizonDevice initialized: provider=%s, country_code=%s",
-            config.provider,
+            device_config.provider,
             self._country_code,
         )
 
     @property
     def identifier(self) -> str:
         """Return the config identifier."""
-        return self._config.identifier
+        return self._device_config.identifier
 
     @property
     def name(self) -> str:
         """Return the config name."""
-        return self._config.name
+        return self._device_config.name
 
     @property
-    def is_connected(self) -> bool:
-        """Return True if connected to Horizon API."""
-        return self._connected and self._api is not None
+    def address(self) -> str | None:
+        """Return the device address (not applicable for cloud API)."""
+        return None
+
+    @property
+    def log_id(self) -> str:
+        """Return a log identifier for the device."""
+        return f"Horizon-{self._device_config.provider}"
 
     @property
     def devices(self) -> dict[str, LGDevice]:
-        """Return discovered devices."""
-        return self._devices
+        """Return discovered LG Horizon devices."""
+        return self._lg_devices
 
     @property
     def config(self) -> HorizonConfig:
         """Return the device configuration."""
-        return self._config
+        return self._device_config
 
-    async def connect(self) -> bool:
-        """Connect to Horizon API using lghorizon 0.9.11."""
-        try:
+    async def create_client(self) -> LGHorizonApi:
+        """Create the lghorizon API client."""
+        if self._country_code not in COUNTRY_SETTINGS:
+            raise ValueError(f"Unsupported country code: {self._country_code}")
+
+        country_config = COUNTRY_SETTINGS[self._country_code]
+        api_url = country_config["api_url"]
+        use_refresh_token = country_config.get("use_refreshtoken", False)
+
+        self._session = aiohttp.ClientSession()
+
+        if use_refresh_token:
             _LOG.info(
-                "Connecting to Horizon API: provider=%s, username=%s",
-                self._config.provider,
-                self._config.username,
+                "Using refresh token authentication for %s",
+                self._country_code.upper(),
+            )
+            self._auth = LGHorizonAuth(
+                session=self._session,
+                api_url=api_url,
+                country_code=self._country_code,
+                username=self._device_config.username,
+                password="",
+                refresh_token=self._device_config.password,
+            )
+        else:
+            self._auth = LGHorizonAuth(
+                session=self._session,
+                api_url=api_url,
+                country_code=self._country_code,
+                username=self._device_config.username,
+                password=self._device_config.password,
             )
 
-            self.events.emit(DeviceEvents.CONNECTING, self.identifier)
+        await self._auth.login()
 
-            if self._country_code not in COUNTRY_SETTINGS:
-                _LOG.error("Unsupported country code: %s", self._country_code)
-                self.events.emit(DeviceEvents.ERROR, self.identifier, "Unsupported country")
-                return False
+        self._api = LGHorizonApi(auth=self._auth, profile_id=None)
+        return self._api
 
-            country_config = COUNTRY_SETTINGS[self._country_code]
-            api_url = country_config["api_url"]
-            use_refresh_token = country_config.get("use_refreshtoken", False)
+    async def connect_client(self) -> None:
+        """Connect the lghorizon client and set up callbacks."""
+        if not self._api:
+            raise RuntimeError("API not initialized")
 
-            self._session = aiohttp.ClientSession()
+        await self._api.initialize()
+        self._lg_devices = await self._api.get_devices()
 
-            if use_refresh_token:
-                _LOG.info(
-                    "Using refresh token authentication for %s",
-                    self._country_code.upper(),
-                )
-                self._auth = LGHorizonAuth(
-                    session=self._session,
-                    api_url=api_url,
-                    country_code=self._country_code,
-                    username=self._config.username,
-                    password="",
-                    refresh_token=self._config.password,
-                )
-            else:
-                self._auth = LGHorizonAuth(
-                    session=self._session,
-                    api_url=api_url,
-                    country_code=self._country_code,
-                    username=self._config.username,
-                    password=self._config.password,
-                )
+        for device_id, device in self._lg_devices.items():
+            await device.set_callback(self._on_device_state_change)
 
-            await self._auth.login()
+        _LOG.info(
+            "Connected to Horizon API successfully. Devices found: %d",
+            len(self._lg_devices),
+        )
 
-            self._api = LGHorizonApi(auth=self._auth, profile_id=None)
-            await self._api.initialize()
-
-            self._devices = await self._api.get_devices()
-
-            for device_id, device in self._devices.items():
-                await device.set_callback(self._on_device_state_change)
-
-            self._connected = True
-            self.events.emit(DeviceEvents.CONNECTED, self.identifier)
-            _LOG.info(
-                "Connected to Horizon API successfully. Devices found: %d",
-                len(self._devices),
-            )
-
-            return True
-
-        except Exception as e:
-            _LOG.error("Failed to connect to Horizon API: %s", e, exc_info=True)
-            self._connected = False
-            self.events.emit(DeviceEvents.ERROR, self.identifier, str(e))
-            await self._cleanup_session()
-            return False
-
-    async def disconnect(self) -> None:
-        """Disconnect from Horizon API."""
-        try:
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-                try:
-                    await self._reconnect_task
-                except asyncio.CancelledError:
-                    pass
-
-            if self._api:
+    async def disconnect_client(self) -> None:
+        """Disconnect the lghorizon client."""
+        if self._api:
+            try:
                 await self._api.disconnect()
-                self._api = None
+            except Exception as e:
+                _LOG.debug("Error disconnecting API: %s", e)
+            self._api = None
 
-            await self._cleanup_session()
-
-            self._devices = {}
-            self._connected = False
-            self.events.emit(DeviceEvents.DISCONNECTED, self.identifier)
-            _LOG.info("Disconnected from Horizon API")
-
-        except Exception as e:
-            _LOG.error("Error during disconnect: %s", e)
-
-    async def _cleanup_session(self) -> None:
-        """Clean up aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
+
+        self._lg_devices = {}
+        self._auth = None
+
+    def check_client_connected(self) -> bool:
+        """Check if the lghorizon client is connected."""
+        return self._api is not None and self._session is not None and not self._session.closed
 
     async def _on_device_state_change(self, device_id: str) -> None:
         """Handle device state change callback from lghorizon MQTT."""
@@ -211,7 +182,7 @@ class HorizonDevice:
 
     async def get_device(self, device_id: str) -> LGDevice | None:
         """Get a specific device by ID."""
-        return self._devices.get(device_id)
+        return self._lg_devices.get(device_id)
 
     async def get_device_state(self, device_id: str) -> dict[str, Any]:
         """Get current state of a device."""

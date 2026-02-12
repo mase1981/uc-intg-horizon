@@ -15,7 +15,8 @@ from ucapi import DeviceStates, Events
 from ucapi_framework import BaseIntegrationDriver
 
 from uc_intg_horizon.config import HorizonConfig
-from uc_intg_horizon.device import DeviceEvents, HorizonDevice
+from ucapi_framework.device import DeviceEvents
+from uc_intg_horizon.device import HorizonDevice
 from uc_intg_horizon.media_player import HorizonMediaPlayer
 from uc_intg_horizon.remote import HorizonRemote
 from uc_intg_horizon.sensor import (
@@ -172,7 +173,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
 
         success = True
         for config in configs:
-            device = self._devices.get(config.identifier)
+            device = self._device_instances.get(config.identifier)
             if device and not device.is_connected:
                 if not await device.connect():
                     _LOG.error("Failed to connect device: %s", config.identifier)
@@ -181,7 +182,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
                     refreshed_token = device.get_refreshed_token()
                     if refreshed_token and refreshed_token != config.password:
                         config.password = refreshed_token
-                        self.config_manager.save(config)
+                        self.config_manager.update(config)
                         _LOG.info("Token refreshed and saved for %s", config.identifier)
 
         if success and self._media_players:
