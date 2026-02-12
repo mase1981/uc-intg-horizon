@@ -1,6 +1,6 @@
 {
   "driver_id": "horizon",
-  "version": "2.0.7",
+  "version": "3.0.0",
 
   "min_core_api": "1.0.0",
   "name": {
@@ -9,9 +9,9 @@
     "nl": "LG Horizon Settop Box"
   },
   "description": {
-    "en": "Control your LG Horizon set-top boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta) with full media player and remote control functionality.",
-    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta) mit vollständiger Media Player- und Fernbedienungsfunktionalität.",
-    "nl": "Bedien uw LG Horizon settop boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta) met volledige mediaspeler- en afstandsbedieningsfunctionaliteit."
+    "en": "Control your LG Horizon set-top boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) with full media player and remote control functionality. Now with seek support!",
+    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise) mit vollständiger Media Player- und Fernbedienungsfunktionalität. Jetzt mit Seek-Unterstützung!",
+    "nl": "Bedien uw LG Horizon settop boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) met volledige mediaspeler- en afstandsbedieningsfunctionaliteit. Nu met seek-ondersteuning!"
   },
   "developer": {
     "name": "Meir Miyara",
@@ -20,7 +20,7 @@
   },
   "home_page": "https://github.com/mase1981/uc-intg-horizon",
   "documentation": "https://github.com/mase1981/uc-intg-horizon/blob/main/README.md",
-  "release_date": "2026-02-09",
+  "release_date": "2026-02-12",
   "icon": "uc:tv",
   "setup_data_schema": {
     "title": {
@@ -72,13 +72,6 @@
                 "label": {
                   "en": "Sunrise (Switzerland)",
                   "de": "Sunrise (Schweiz)"
-                }
-              },
-              {
-                "id": "Magenta",
-                "label": {
-                  "en": "Magenta (Austria)",
-                  "de": "Magenta (Österreich)"
                 }
               }
             ]

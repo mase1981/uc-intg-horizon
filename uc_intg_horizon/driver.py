@@ -1,18 +1,25 @@
 """
-Main integration driver for Horizon with reboot survival.
+Main integration driver for Horizon.
 
 :copyright: (c) 2025 by Meir Miyara
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+from __future__ import annotations
+
 import asyncio
+import json
 import logging
+import os
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
 
 import ucapi
-from ucapi.api_definitions import DeviceStates, Events, SetupAction, SetupComplete
+from ucapi.api_definitions import DeviceStates, Events, SetupAction
 
-from uc_intg_horizon.client import HorizonClient
-from uc_intg_horizon.config import HorizonConfig
+from uc_intg_horizon.config import HorizonConfig, HorizonDeviceConfig
+from uc_intg_horizon.device import HorizonDevice
 from uc_intg_horizon.media_player import HorizonMediaPlayer
 from uc_intg_horizon.remote import HorizonRemote
 from uc_intg_horizon.sensor import (
@@ -20,464 +27,381 @@ from uc_intg_horizon.sensor import (
     HorizonDeviceStateSensor,
     HorizonProgramSensor,
 )
-from uc_intg_horizon.setup_manager import SetupManager
+from uc_intg_horizon.setup_flow import HorizonSetupFlow
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s | %(name)-40s | %(levelname)-8s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 _LOG = logging.getLogger(__name__)
 
-api: ucapi.IntegrationAPI | None = None
-_config: HorizonConfig | None = None
-_client: HorizonClient | None = None
-_setup_manager: SetupManager | None = None
-_media_players: dict[str, HorizonMediaPlayer] = {}
-_remotes: dict[str, HorizonRemote] = {}
-_sensors: dict[str, list] = {}
-_entities_ready: bool = False
-_initialization_lock: asyncio.Lock = asyncio.Lock()
-_retry_task: asyncio.Task | None = None
 
+class HorizonConfigManager:
+    """Manages configuration persistence."""
 
-async def _save_refreshed_token(api_instance=None):
-    global _config, _client
-    
-    if not _config:
-        return
-    
-    if not api_instance and not _client:
-        return
-    
-    try:
-        if api_instance:
-            current_token = getattr(api_instance, 'refresh_token', None)
-        else:
-            current_token = getattr(_client._api, 'refresh_token', None)
-        
-        if current_token and current_token != _config.password:
-            _LOG.info("Token was refreshed during connection, updating storage")
-            _LOG.info("Old token: %s...", _config.password[:20] if _config.password else "None")
-            _LOG.info("New token: %s...", current_token[:20])
-            
-            _config.password = current_token
-            
-            if _config.save_config():
-                _LOG.info("Refreshed token saved successfully")
-            else:
-                _LOG.error("Failed to save refreshed token!")
-        else:
-            _LOG.debug("Token unchanged, no save needed")
-            
-    except Exception as e:
-        _LOG.error("Error checking/saving refreshed token: %s", e, exc_info=True)
+    def __init__(self) -> None:
+        """Initialize config manager."""
+        data_dir = os.environ.get("UC_CONFIG_HOME", "/data")
+        os.makedirs(data_dir, exist_ok=True)
+        self._config_path = Path(data_dir) / "config.json"
+        self._configs: dict[str, HorizonConfig] = {}
 
+    def add(self, config: HorizonConfig) -> None:
+        """Add or update a configuration."""
+        self._configs[config.identifier] = config
 
-async def _retry_initialization_with_backoff():
-    """
-    Retry initialization with exponential backoff for network failures.
-    
-    This background task ensures the integration recovers from transient
-    network issues (DNS failures, timeouts) without requiring user intervention.
-    """
-    global _entities_ready, api
-    
-    retry_delays = [5, 10, 20, 30, 60, 120, 300]
-    retry_count = 0
-    
-    while not _entities_ready and _config and _config.is_configured():
-        if retry_count >= len(retry_delays):
-            delay = retry_delays[-1]
-        else:
-            delay = retry_delays[retry_count]
-        
-        _LOG.warning(
-            f"Retrying entity initialization in {delay}s (attempt #{retry_count + 1})..."
-        )
-        await asyncio.sleep(delay)
-        
-        _LOG.info(f"Retry attempt #{retry_count + 1}: Starting entity initialization...")
-        
-        try:
-            success = await _initialize_integration()
-            
-            if success:
-                _LOG.info("Retry successful! Integration recovered.")
-                await api.set_device_state(DeviceStates.CONNECTED)
-                return
-            else:
-                _LOG.warning(f"Retry attempt #{retry_count + 1} failed, will try again...")
-                retry_count += 1
-                
-        except Exception as e:
-            _LOG.error(f"Retry attempt #{retry_count + 1} error: {e}")
-            retry_count += 1
-    
-    if not _entities_ready:
-        _LOG.error("All retry attempts exhausted, integration remains in ERROR state")
-
-
-async def _initialize_integration():
-    global _config, _client, _media_players, _remotes, _sensors, api, _entities_ready
-    
-    async with _initialization_lock:
-        if _entities_ready and _client and _client.is_connected:
-            _LOG.debug("Entities already initialized and connected")
-            for mp in _media_players.values():
-                await mp.push_update()
-            for remote in _remotes.values():
-                await remote.push_update()
+    def remove(self, identifier: str) -> bool:
+        """Remove a configuration."""
+        if identifier in self._configs:
+            del self._configs[identifier]
             return True
-            
-        if not _config or not _config.is_configured():
-            _LOG.info("Integration not configured, skipping entity initialization")
-            return False
-            
-        _LOG.info("=" * 70)
-        _LOG.info("=== Starting Entity Initialization ===")
-        _LOG.info("=" * 70)
-        
-        try:
-            if not _client:
-                _LOG.info("Creating Horizon API client")
-                _client = HorizonClient(
-                    provider=_config.provider,
-                    username=_config.username,
-                    password=_config.password,
-                )
-            
-            if not _client.is_connected:
-                _LOG.info("Connecting to Horizon API (with MQTT wait)...")
-                if not await _client.connect(token_save_callback=_save_refreshed_token):
-                    _LOG.error("Failed to connect to Horizon API")
-                    return False
-                    
-                _LOG.info("Connected to Horizon API")
-            else:
-                _LOG.info("Already connected to Horizon API")
-            
-            _LOG.info("Querying Horizon API for device states...")
-            api_devices = await _client.get_devices()
-            
-            available_device_map = {}
-            for device in api_devices:
-                device_id = device["device_id"]
-                device_state = device.get("state", "unknown")
-                
-                if device_state and device_state != "unavailable":
-                    available_device_map[device_id] = device
-                    _LOG.info(f"✓ Device available: {device['name']} (ID: {device_id}) - State: {device_state}")
-                else:
-                    _LOG.warning(f"✗ Device unavailable: {device['name']} (ID: {device_id}) - No MQTT state")
-            
-            _LOG.info(f"Status: {len(available_device_map)}/{len(api_devices)} devices available")
-            
-            _LOG.info(f"Matching {len(_config.devices)} configured device(s)...")
-            
-            devices_to_create = []
-            devices_not_found = []
-            
-            for config_device in _config.devices:
-                device_id = config_device["device_id"]
-                device_name = config_device["name"]
-                
-                if device_id in available_device_map:
-                    devices_to_create.append({
-                        "device_id": device_id,
-                        "name": device_name,
-                        "state": available_device_map[device_id]["state"]
-                    })
-                    _LOG.info(f"✓ MATCH: {device_name} (ID: {device_id}) - Will create entities")
-                else:
-                    devices_not_found.append({
-                        "device_id": device_id,
-                        "name": device_name
-                    })
-                    _LOG.warning(f"✗ NOT FOUND: {device_name} (ID: {device_id}) - No MQTT state reported")
-            
-            if devices_not_found:
-                _LOG.warning("=" * 70)
-                _LOG.warning(f"{len(devices_not_found)} configured device(s) not found:")
-                for d in devices_not_found:
-                    _LOG.warning(f"   - {d['name']} (ID: {d['device_id']})")
-                _LOG.warning("These devices are not reporting to MQTT")
-                _LOG.warning("💡 To fix: Ensure boxes are powered on and connected to network")
-                _LOG.warning("=" * 70)
-            
-            if not devices_to_create:
-                _LOG.error("No available devices to create entities for!")
-                _LOG.error("All configured devices are not reporting to MQTT")
-                return False
-            
-            _LOG.info("Waiting additional 2 seconds for MQTT stability...")
-            await asyncio.sleep(2)
-            
-            _LOG.info(f"Creating entities for {len(devices_to_create)} matched device(s)...")
-            api.available_entities.clear()
-            _media_players.clear()
-            _remotes.clear()
-            _sensors.clear()
+        return False
 
-            for device in devices_to_create:
-                device_id = device["device_id"]
-                device_name = device["name"]
-                device_state = device["state"]
+    def get(self, identifier: str) -> HorizonConfig | None:
+        """Get a configuration by identifier."""
+        return self._configs.get(identifier)
 
-                _LOG.info(f"  Creating entities for: {device_name} (State: {device_state})")
+    def all(self) -> list[HorizonConfig]:
+        """Get all configurations."""
+        return list(self._configs.values())
 
-                device_state_sensor = HorizonDeviceStateSensor(
-                    device_id=device_id,
-                    device_name=device_name,
-                    client=_client,
-                    api=api,
-                )
-
-                channel_sensor = HorizonChannelSensor(
-                    device_id=device_id,
-                    device_name=device_name,
-                    client=_client,
-                    api=api,
-                )
-
-                program_sensor = HorizonProgramSensor(
-                    device_id=device_id,
-                    device_name=device_name,
-                    client=_client,
-                    api=api,
-                )
-
-                device_sensors = [device_state_sensor, channel_sensor, program_sensor]
-                _sensors[device_id] = device_sensors
-
-                media_player = HorizonMediaPlayer(
-                    device_id=device_id,
-                    device_name=device_name,
-                    client=_client,
-                    api=api,
-                    sensors=device_sensors,
-                )
-                _media_players[device_id] = media_player
-                api.available_entities.add(media_player)
-                _LOG.info(f"  ✓ Created Media Player: {media_player.id}")
-
-                remote = HorizonRemote(
-                    device_id=device_id,
-                    device_name=device_name,
-                    client=_client,
-                    api=api,
-                    media_player=media_player,
-                )
-                _remotes[device_id] = remote
-                api.available_entities.add(remote)
-                _LOG.info(f"  ✓ Created Remote: {remote.id}")
-
-                api.available_entities.add(device_state_sensor)
-                api.available_entities.add(channel_sensor)
-                api.available_entities.add(program_sensor)
-
-                _LOG.info(f"  ✓ Created Sensor: {device_state_sensor.id}")
-                _LOG.info(f"  ✓ Created Sensor: {channel_sensor.id}")
-                _LOG.info(f"  ✓ Created Sensor: {program_sensor.id}")
-            
-            _entities_ready = True
-            
-            _LOG.info("=" * 70)
-            _LOG.info("Entity initialization complete!")
-            _LOG.info(f"Summary:")
-            _LOG.info(f"   - Media Players created: {len(_media_players)}")
-            _LOG.info(f"   - Remotes created: {len(_remotes)}")
-            _LOG.info(f"   - Sensors created: {sum(len(sensors) for sensors in _sensors.values())}")
-            _LOG.info(f"   - Devices not found: {len(devices_not_found)}")
-            _LOG.info("=" * 70)
-            
-            return True
-            
-        except Exception as e:
-            _LOG.error("Failed to initialize entities: %s", e, exc_info=True)
-            _entities_ready = False
-            return False
-
-
-async def on_connect() -> None:
-    global _config, _entities_ready, _retry_task
-    
-    _LOG.info("=" * 70)
-    _LOG.info("=== UC Remote CONNECT Event ===")
-    _LOG.info("=" * 70)
-    
-    if not _config:
-        _config = HorizonConfig()
-    
-    _config.reload_from_disk()
-    
-    if not _config.is_configured():
-        _LOG.info("Integration not configured - awaiting setup")
-        await api.set_device_state(DeviceStates.DISCONNECTED)
-        return
-    
-    _LOG.info(f"Configuration loaded: {len(_config.devices)} device(s) in config")
-    for device in _config.devices:
-        _LOG.info(f"  - {device['name']} (ID: {device['device_id']})")
-    
-    success = await _initialize_integration()
-    
-    if not success:
-        _LOG.error("Entity initialization failed")
-        _LOG.warning("Starting background retry task to recover from network issues...")
-        
-        await api.set_device_state(DeviceStates.ERROR)
-        
-        if _retry_task is None or _retry_task.done():
-            _retry_task = asyncio.create_task(_retry_initialization_with_backoff())
-        
-        return
-    
-    _LOG.info("Setting device state to CONNECTED")
-    await api.set_device_state(DeviceStates.CONNECTED)
-
-
-async def on_disconnect() -> None:
-    _LOG.info("=" * 70)
-    _LOG.info("=== UC Remote DISCONNECT Event ===")
-    _LOG.info("Preserving entities and connection for reconnection")
-    _LOG.info("=" * 70)
-
-
-async def on_subscribe_entities(entity_ids: list[str]):
-    _LOG.info("=" * 70)
-    _LOG.info("=== Entity Subscription Request ===")
-    _LOG.info(f"Requested entity IDs: {entity_ids}")
-    
-    if not _entities_ready:
-        _LOG.error("RACE CONDITION DETECTED: Subscription before entities ready!")
-        _LOG.info("Attempting emergency initialization...")
-        
-        if _config and _config.is_configured():
-            success = await _initialize_integration()
-            if not success:
-                _LOG.error("Emergency initialization failed")
-                return
-        else:
-            _LOG.error("Cannot initialize - no configuration available")
+    async def load(self) -> None:
+        """Load configurations from disk."""
+        if not self._config_path.exists():
+            _LOG.debug("No configuration file found at %s", self._config_path)
             return
-    
-    available_ids = []
-    for device_id, mp in _media_players.items():
-        available_ids.append(mp.id)
-    for device_id, remote in _remotes.items():
-        available_ids.append(remote.id)
-    for device_id, sensors in _sensors.items():
-        for sensor in sensors:
-            available_ids.append(sensor.id)
 
-    _LOG.info(f"Available entity IDs: {available_ids}")
+        try:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-    for entity_id in entity_ids:
-        matched = False
+            for config_data in data.get("configs", []):
+                devices = [
+                    HorizonDeviceConfig(**d) for d in config_data.get("devices", [])
+                ]
+                config = HorizonConfig(
+                    identifier=config_data["identifier"],
+                    name=config_data["name"],
+                    provider=config_data["provider"],
+                    username=config_data["username"],
+                    password=config_data["password"],
+                    devices=devices,
+                )
+                self._configs[config.identifier] = config
 
-        for device_id, media_player in _media_players.items():
-            if entity_id == media_player.id:
-                api.configured_entities.add(media_player)
-                await media_player.push_update()
-                _LOG.info(f"  ✓ Subscribed to media player: {entity_id}")
-                matched = True
-                break
+            _LOG.info("Loaded %d configuration(s) from disk", len(self._configs))
 
-        if not matched:
-            for device_id, remote in _remotes.items():
-                if entity_id == remote.id:
-                    api.configured_entities.add(remote)
-                    await remote.push_update()
-                    _LOG.info(f"  ✓ Subscribed to remote: {entity_id}")
-                    matched = True
+        except Exception as e:
+            _LOG.error("Failed to load configuration: %s", e)
+
+    async def save(self) -> None:
+        """Save configurations to disk."""
+        try:
+            data = {
+                "configs": [asdict(c) for c in self._configs.values()]
+            }
+
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            _LOG.info("Saved %d configuration(s) to disk", len(self._configs))
+
+        except Exception as e:
+            _LOG.error("Failed to save configuration: %s", e)
+
+
+class HorizonDriver:
+    """Main driver for Horizon integration."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Initialize the Horizon driver."""
+        self._loop = loop
+        self._api: ucapi.IntegrationAPI = ucapi.IntegrationAPI(loop)
+
+        self.config_manager = HorizonConfigManager()
+        self._setup_flow = HorizonSetupFlow(self)
+
+        self._devices: dict[str, HorizonDevice] = {}
+        self._media_players: dict[str, HorizonMediaPlayer] = {}
+        self._remotes: dict[str, HorizonRemote] = {}
+        self._sensors: dict[str, list] = {}
+
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
+        self._retry_task: asyncio.Task | None = None
+
+    @property
+    def api(self) -> ucapi.IntegrationAPI:
+        """Return the UC API instance."""
+        return self._api
+
+    async def start(self) -> None:
+        """Start the driver."""
+        _LOG.info("Starting Horizon driver...")
+
+        await self.config_manager.load()
+
+        self._api.add_listener(Events.CONNECT, self._on_connect)
+        self._api.add_listener(Events.DISCONNECT, self._on_disconnect)
+        self._api.add_listener(Events.SUBSCRIBE_ENTITIES, self._on_subscribe_entities)
+
+        await self._api.init("driver.json", self._setup_handler)
+
+        if self.config_manager.all():
+            _LOG.info("Configuration found - initializing for reboot survival")
+            await self._initialize_all()
+
+        await self._api.set_device_state(DeviceStates.DISCONNECTED)
+
+        _LOG.info("Horizon driver started")
+
+    async def stop(self) -> None:
+        """Stop the driver."""
+        _LOG.info("Stopping Horizon driver...")
+
+        if self._retry_task and not self._retry_task.done():
+            self._retry_task.cancel()
+            try:
+                await self._retry_task
+            except asyncio.CancelledError:
+                pass
+
+        for device in self._devices.values():
+            await device.disconnect()
+
+        self._devices.clear()
+        self._media_players.clear()
+        self._remotes.clear()
+        self._sensors.clear()
+
+        _LOG.info("Horizon driver stopped")
+
+    async def _setup_handler(self, msg: SetupAction) -> SetupAction:
+        """Handle setup messages."""
+        result = await self._setup_flow.handle_setup(msg)
+
+        from ucapi.api_definitions import SetupComplete
+
+        if isinstance(result, SetupComplete):
+            _LOG.info("Setup complete - initializing integration")
+            await self._initialize_all()
+
+        return result
+
+    async def _on_connect(self) -> None:
+        """Handle UC Remote connect event."""
+        _LOG.info("UC Remote connected")
+
+        await self.config_manager.load()
+
+        if not self.config_manager.all():
+            _LOG.info("No configuration - awaiting setup")
+            await self._api.set_device_state(DeviceStates.DISCONNECTED)
+            return
+
+        if not self._initialized:
+            success = await self._initialize_all()
+            if not success:
+                await self._api.set_device_state(DeviceStates.ERROR)
+                self._start_retry_task()
+                return
+
+        await self._api.set_device_state(DeviceStates.CONNECTED)
+
+    async def _on_disconnect(self) -> None:
+        """Handle UC Remote disconnect event."""
+        _LOG.info("UC Remote disconnected - preserving connections")
+
+    async def _on_subscribe_entities(self, entity_ids: list[str]) -> None:
+        """Handle entity subscription."""
+        _LOG.info("Entity subscription request: %s", entity_ids)
+
+        if not self._initialized:
+            _LOG.warning("Subscription before initialization - attempting init")
+            if self.config_manager.all():
+                await self._initialize_all()
+
+        for entity_id in entity_ids:
+            entity = self._find_entity(entity_id)
+            if entity:
+                self._api.configured_entities.add(entity)
+                await entity.push_update()
+                _LOG.info("Subscribed to entity: %s", entity_id)
+            else:
+                _LOG.warning("Entity not found: %s", entity_id)
+
+    def _find_entity(self, entity_id: str) -> Any | None:
+        """Find an entity by ID."""
+        for mp in self._media_players.values():
+            if mp.id == entity_id:
+                return mp
+
+        for remote in self._remotes.values():
+            if remote.id == entity_id:
+                return remote
+
+        for sensors in self._sensors.values():
+            for sensor in sensors:
+                if sensor.id == entity_id:
+                    return sensor
+
+        return None
+
+    async def _initialize_all(self) -> bool:
+        """Initialize all configured devices."""
+        async with self._init_lock:
+            if self._initialized:
+                return True
+
+            _LOG.info("Initializing Horizon integration...")
+
+            self._api.available_entities.clear()
+            self._media_players.clear()
+            self._remotes.clear()
+            self._sensors.clear()
+
+            success = True
+
+            for config in self.config_manager.all():
+                if not await self._initialize_config(config):
+                    success = False
+
+            if self._media_players:
+                self._initialized = True
+                _LOG.info(
+                    "Initialization complete: %d media players, %d remotes, %d sensors",
+                    len(self._media_players),
+                    len(self._remotes),
+                    sum(len(s) for s in self._sensors.values()),
+                )
+            else:
+                _LOG.error("No devices initialized")
+                success = False
+
+            return success
+
+    async def _initialize_config(self, config: HorizonConfig) -> bool:
+        """Initialize devices for a configuration."""
+        _LOG.info("Initializing config: %s", config.identifier)
+
+        device = HorizonDevice(config)
+
+        if not await device.connect():
+            _LOG.error("Failed to connect: %s", config.identifier)
+            return False
+
+        self._devices[config.identifier] = device
+
+        device.set_state_callback(self._on_device_state_change)
+
+        refreshed_token = device.get_refreshed_token()
+        if refreshed_token and refreshed_token != config.password:
+            config.password = refreshed_token
+            await self.config_manager.save()
+
+        for device_config in config.devices:
+            device_id = device_config.device_id
+            device_name = device_config.name
+
+            api_device = await device.get_device(device_id)
+            if not api_device:
+                _LOG.warning("Device not found in API: %s", device_id)
+                continue
+
+            state_sensor = HorizonDeviceStateSensor(
+                device_id=device_id,
+                device_name=device_name,
+                horizon_device=device,
+                api=self._api,
+            )
+
+            channel_sensor = HorizonChannelSensor(
+                device_id=device_id,
+                device_name=device_name,
+                horizon_device=device,
+                api=self._api,
+            )
+
+            program_sensor = HorizonProgramSensor(
+                device_id=device_id,
+                device_name=device_name,
+                horizon_device=device,
+                api=self._api,
+            )
+
+            sensors = [state_sensor, channel_sensor, program_sensor]
+            self._sensors[device_id] = sensors
+
+            media_player = HorizonMediaPlayer(
+                device_id=device_id,
+                device_name=device_name,
+                horizon_device=device,
+                api=self._api,
+                sensors=sensors,
+            )
+            self._media_players[device_id] = media_player
+            self._api.available_entities.add(media_player)
+
+            remote = HorizonRemote(
+                device_id=device_id,
+                device_name=device_name,
+                horizon_device=device,
+                api=self._api,
+                media_player=media_player,
+            )
+            self._remotes[device_id] = remote
+            self._api.available_entities.add(remote)
+
+            for sensor in sensors:
+                self._api.available_entities.add(sensor)
+
+            _LOG.info("Created entities for device: %s", device_name)
+
+        return True
+
+    async def _on_device_state_change(self, device_id: str) -> None:
+        """Handle device state change from lghorizon."""
+        _LOG.debug("Device state changed: %s", device_id)
+
+        if device_id in self._media_players:
+            mp = self._media_players[device_id]
+            if self._api.configured_entities.contains(mp.id):
+                await mp.push_update()
+
+        if device_id in self._remotes:
+            remote = self._remotes[device_id]
+            if self._api.configured_entities.contains(remote.id):
+                await remote.push_update()
+
+        if device_id in self._sensors:
+            for config in self.config_manager.all():
+                device = self._devices.get(config.identifier)
+                if device:
+                    state = await device.get_device_state(device_id)
+                    for sensor in self._sensors[device_id]:
+                        if self._api.configured_entities.contains(sensor.id):
+                            await sensor.update_state(state)
                     break
 
-        if not matched:
-            for device_id, sensors in _sensors.items():
-                for sensor in sensors:
-                    if entity_id == sensor.id:
-                        api.configured_entities.add(sensor)
-                        device_state = await _client.get_device_state(device_id)
-                        await sensor.update_state(device_state)
-                        _LOG.info(f"  ✓ Subscribed to sensor: {entity_id}")
-                        matched = True
-                        break
-                if matched:
-                    break
+    def _start_retry_task(self) -> None:
+        """Start background retry task."""
+        if self._retry_task is None or self._retry_task.done():
+            self._retry_task = asyncio.create_task(self._retry_initialization())
 
-        if not matched:
-            _LOG.warning(f"  ✗ Entity not found: {entity_id}")
-    
-    _LOG.info("=" * 70)
+    async def _retry_initialization(self) -> None:
+        """Retry initialization with backoff."""
+        delays = [5, 10, 20, 30, 60, 120, 300]
+        attempt = 0
 
+        while not self._initialized and self.config_manager.all():
+            delay = delays[min(attempt, len(delays) - 1)]
+            _LOG.warning("Retrying in %ds (attempt #%d)...", delay, attempt + 1)
+            await asyncio.sleep(delay)
 
-async def setup_handler(msg: SetupAction) -> SetupAction:
-    global _setup_manager
-    
-    if not _setup_manager:
-        _setup_manager = SetupManager(_config)
-    
-    action = await _setup_manager.handle_setup(msg)
-    
-    if isinstance(action, SetupComplete):
-        _LOG.info("=" * 70)
-        _LOG.info("=== Setup Complete - Initializing Integration ===")
-        _LOG.info("=" * 70)
-        await _initialize_integration()
-    
-    return action
+            try:
+                if await self._initialize_all():
+                    _LOG.info("Retry successful!")
+                    await self._api.set_device_state(DeviceStates.CONNECTED)
+                    return
+            except Exception as e:
+                _LOG.error("Retry failed: %s", e)
 
+            attempt += 1
 
-async def main():
-    global api, _config
-    
-    try:
-        loop = asyncio.get_running_loop()
-        api = ucapi.IntegrationAPI(loop)
-        
-        _config = HorizonConfig()
-        
-        if _config.is_configured():
-            _LOG.info("=" * 70)
-            _LOG.info("=== Pre-initialization for Reboot Survival ===")
-            _LOG.info("Configuration found - initializing entities BEFORE UC Remote connects")
-            _LOG.info("=" * 70)
-            
-            await _initialize_integration()
-            
-            _LOG.info("=" * 70)
-            _LOG.info("✓ Pre-initialization complete, entities ready for UC Remote")
-            _LOG.info("=" * 70)
-        
-        api.add_listener(Events.CONNECT, on_connect)
-        api.add_listener(Events.DISCONNECT, on_disconnect)
-        api.add_listener(Events.SUBSCRIBE_ENTITIES, on_subscribe_entities)
-        
-        await api.init("driver.json", setup_handler)
-        await api.set_device_state(DeviceStates.DISCONNECTED)
-        
-        _LOG.info("=" * 70)
-        _LOG.info("=== Horizon Integration Driver Started ===")
-        _LOG.info("=" * 70)
-        
-        await asyncio.Future()
-        
-    except asyncio.CancelledError:
-        _LOG.info("Driver task cancelled")
-    except Exception as e:
-        _LOG.error("Fatal error in main: %s", e, exc_info=True)
-        raise
-    finally:
-        if _client:
-            await _client.disconnect()
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        _LOG.info("Integration stopped by user")
-    except Exception as e:
-        _LOG.error("Fatal error: %s", e, exc_info=True)
-        raise
+        _LOG.error("All retry attempts exhausted")

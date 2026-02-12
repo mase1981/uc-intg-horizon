@@ -5,13 +5,17 @@ Sensor entities for Horizon integration.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ucapi import Sensor
 from ucapi.sensor import Attributes, DeviceClasses, States
 
-from uc_intg_horizon.client import HorizonClient
+if TYPE_CHECKING:
+    import ucapi
+    from uc_intg_horizon.device import HorizonDevice
 
 _LOG = logging.getLogger(__name__)
 
@@ -23,11 +27,12 @@ class HorizonDeviceStateSensor(Sensor):
         self,
         device_id: str,
         device_name: str,
-        client: HorizonClient,
-        api,
-    ):
+        horizon_device: HorizonDevice,
+        api: ucapi.IntegrationAPI,
+    ) -> None:
+        """Initialize the device state sensor."""
         self._device_id = device_id
-        self._client = client
+        self._horizon_device = horizon_device
         self._api = api
 
         entity_id = f"{device_id}_state"
@@ -52,7 +57,7 @@ class HorizonDeviceStateSensor(Sensor):
         try:
             horizon_state = device_state.get("state", "unavailable")
 
-            if horizon_state in ["ONLINE_RUNNING", "ONLINE_STANDBY", "OFFLINE", "OFFLINE_NETWORK_STANDBY"]:
+            if horizon_state in ["ONLINE_RUNNING", "ONLINE_STANDBY", "OFFLINE"]:
                 self.attributes[Attributes.STATE] = States.ON
                 self.attributes[Attributes.VALUE] = horizon_state
             else:
@@ -66,6 +71,11 @@ class HorizonDeviceStateSensor(Sensor):
         except Exception as e:
             _LOG.error("Failed to update device state sensor: %s", e)
 
+    async def push_update(self) -> None:
+        """Push state update to UC Remote."""
+        device_state = await self._horizon_device.get_device_state(self._device_id)
+        await self.update_state(device_state)
+
 
 class HorizonChannelSensor(Sensor):
     """Sensor entity for current channel."""
@@ -74,11 +84,12 @@ class HorizonChannelSensor(Sensor):
         self,
         device_id: str,
         device_name: str,
-        client: HorizonClient,
-        api,
-    ):
+        horizon_device: HorizonDevice,
+        api: ucapi.IntegrationAPI,
+    ) -> None:
+        """Initialize the channel sensor."""
         self._device_id = device_id
-        self._client = client
+        self._horizon_device = horizon_device
         self._api = api
 
         entity_id = f"{device_id}_channel"
@@ -117,6 +128,11 @@ class HorizonChannelSensor(Sensor):
         except Exception as e:
             _LOG.error("Failed to update channel sensor: %s", e)
 
+    async def push_update(self) -> None:
+        """Push state update to UC Remote."""
+        device_state = await self._horizon_device.get_device_state(self._device_id)
+        await self.update_state(device_state)
+
 
 class HorizonProgramSensor(Sensor):
     """Sensor entity for current program."""
@@ -125,11 +141,12 @@ class HorizonProgramSensor(Sensor):
         self,
         device_id: str,
         device_name: str,
-        client: HorizonClient,
-        api,
-    ):
+        horizon_device: HorizonDevice,
+        api: ucapi.IntegrationAPI,
+    ) -> None:
+        """Initialize the program sensor."""
         self._device_id = device_id
-        self._client = client
+        self._horizon_device = horizon_device
         self._api = api
 
         entity_id = f"{device_id}_program"
@@ -167,3 +184,8 @@ class HorizonProgramSensor(Sensor):
 
         except Exception as e:
             _LOG.error("Failed to update program sensor: %s", e)
+
+    async def push_update(self) -> None:
+        """Push state update to UC Remote."""
+        device_state = await self._horizon_device.get_device_state(self._device_id)
+        await self.update_state(device_state)

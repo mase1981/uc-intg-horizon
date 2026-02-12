@@ -39,7 +39,6 @@ This integration works with LG Horizon boxes from the following providers:
 - 🇧🇪 **Telenet** (Belgium)
 - 🇨🇭 **UPC** (Switzerland)
 - 🇨🇭 **Sunrise** (Switzerland)
-- 🇦🇹 **Magenta** (Austria)
 
 ### 🎵 **Media Player Control**
 
@@ -51,6 +50,7 @@ This integration works with LG Horizon boxes from the following providers:
 - **Play/Pause Toggle** - Control playback state
 - **Stop** - Stop playback
 - **Fast Forward/Rewind** - Skip forward/backward
+- **Seek** - Jump to specific position in recordings/catch-up TV
 - **Record** - Start recordings with Record button
 
 #### **Channel Navigation**
@@ -87,7 +87,7 @@ This integration works with LG Horizon boxes from the following providers:
 ### **Provider Requirements**
 
 - **Account Credentials** - Provider account username/email + password or refresh token
-- **Supported Providers** - Ziggo, Virgin Media, Telenet, UPC, Sunrise, Magenta
+- **Supported Providers** - Ziggo, Virgin Media, Telenet, UPC, Sunrise
 - **Network Access** - Device must be on same local network
 - **HDMI-CEC** - Required for volume control (enable on TV)
 
@@ -161,7 +161,7 @@ The tool automatically cleans and validates your token, removing quotes, whitesp
 - Require **refresh token**
 - Use Token Extractor Tool above
 
-**For Ziggo (NL), Magenta (AT):**
+**For Ziggo (NL):**
 - Use regular account **password**
 - No token extraction needed
 
@@ -181,7 +181,7 @@ The tool automatically cleans and validates your token, removing quotes, whitesp
 - **Provider** - Select your TV provider from dropdown
 - **Username/Email** - Your account email address
 - **Password (or Refresh Token)**:
-  - 🇳🇱🇦🇹 NL/AT - Enter your account password
+  - 🇳🇱 NL - Enter your account password
   - 🇬🇧🇧🇪🇨🇭 UK/BE/CH - Enter your refresh token
 - Click **Submit**
 

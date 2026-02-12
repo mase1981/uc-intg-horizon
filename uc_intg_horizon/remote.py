@@ -5,9 +5,11 @@ Remote Control entity for Horizon integration.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ucapi import Remote, StatusCodes
 from ucapi.remote import Attributes, Commands, Features, States
@@ -20,27 +22,32 @@ from ucapi.ui import (
     create_ui_text,
 )
 
-from uc_intg_horizon.client import HorizonClient
+if TYPE_CHECKING:
+    import ucapi
+    from uc_intg_horizon.device import HorizonDevice
+    from uc_intg_horizon.media_player import HorizonMediaPlayer
 
 _LOG = logging.getLogger(__name__)
 
 
 class HorizonRemote(Remote):
+    """Remote Control entity for a Horizon set-top box."""
 
     def __init__(
         self,
         device_id: str,
         device_name: str,
-        client: HorizonClient,
-        api,
-        media_player=None,
-    ):
+        horizon_device: HorizonDevice,
+        api: ucapi.IntegrationAPI,
+        media_player: HorizonMediaPlayer | None = None,
+    ) -> None:
+        """Initialize the remote entity."""
         self._device_id = device_id
-        self._client = client
+        self._horizon_device = horizon_device
         self._api = api
         self._media_player = media_player
-        self._digit_update_task = None
-        self._channel_update_task = None
+        self._digit_update_task: asyncio.Task | None = None
+        self._channel_update_task: asyncio.Task | None = None
 
         simple_commands = [
             "POWER_ON", "POWER_OFF", "POWER_TOGGLE",
@@ -99,57 +106,59 @@ class HorizonRemote(Remote):
         )
 
         _LOG.info("Initialized Horizon Remote: %s (%s)", device_name, device_id)
-        
+
         asyncio.create_task(self._start_periodic_refresh())
 
-    async def _start_periodic_refresh(self):
-        _LOG.info(f"Starting 15-second periodic refresh for remote {self._device_id}")
-        
+    async def _start_periodic_refresh(self) -> None:
+        """Start periodic state refresh."""
+        _LOG.info("Starting 15-second periodic refresh for remote %s", self._device_id)
+
         await asyncio.sleep(15)
-        
+
         while True:
             try:
                 if self._api and self._api.configured_entities.contains(self.id):
-                    _LOG.debug(f"Periodic refresh triggered for remote {self._device_id}")
                     await self.push_update()
-                
+
                 await asyncio.sleep(15)
-                
+
             except asyncio.CancelledError:
-                _LOG.info(f"Periodic refresh stopped for remote {self._device_id}")
+                _LOG.info("Periodic refresh stopped for remote %s", self._device_id)
                 break
             except Exception as e:
-                _LOG.error(f"Error in periodic refresh for remote {self._device_id}: {e}")
+                _LOG.error("Error in periodic refresh for remote %s: %s", self._device_id, e)
                 await asyncio.sleep(15)
 
     def _create_main_page(self) -> UiPage:
+        """Create main control UI page."""
         page = UiPage("main", "Main Control", grid=Size(4, 6))
-        
+
         page.add(create_ui_text("ON", 0, 0, cmd="POWER_ON"))
         page.add(create_ui_text("OFF", 1, 0, cmd="POWER_OFF"))
         page.add(create_ui_text("TV", 2, 0, cmd="TV"))
         page.add(create_ui_text("SRC", 3, 0, cmd="SOURCE"))
-        
+
         page.add(create_ui_icon("uc:up-arrow", 1, 1, cmd="UP"))
         page.add(create_ui_icon("uc:left-arrow", 0, 2, cmd="LEFT"))
         page.add(create_ui_text("OK", 1, 2, size=Size(2, 1), cmd="SELECT"))
         page.add(create_ui_icon("uc:right-arrow", 3, 2, cmd="RIGHT"))
         page.add(create_ui_icon("uc:down-arrow", 1, 3, cmd="DOWN"))
-        
+
         page.add(create_ui_text("P/P", 0, 4, size=Size(2, 1), cmd="PLAYPAUSE"))
         page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
         page.add(create_ui_text("REC", 3, 4, cmd="RECORD"))
-        
+
         page.add(create_ui_icon("uc:home", 0, 5, cmd="HOME"))
         page.add(create_ui_icon("uc:back", 1, 5, cmd="BACK"))
         page.add(create_ui_icon("uc:menu", 2, 5, cmd="MENU"))
         page.add(create_ui_icon("uc:guide", 3, 5, cmd="GUIDE"))
-        
+
         return page
 
     def _create_numbers_page(self) -> UiPage:
+        """Create number pad UI page."""
         page = UiPage("numbers", "Channel Numbers", grid=Size(4, 6))
-        
+
         page.add(create_ui_text("1", 0, 1, cmd="1"))
         page.add(create_ui_text("2", 1, 1, cmd="2"))
         page.add(create_ui_text("3", 2, 1, cmd="3"))
@@ -160,41 +169,46 @@ class HorizonRemote(Remote):
         page.add(create_ui_text("8", 1, 3, cmd="8"))
         page.add(create_ui_text("9", 2, 3, cmd="9"))
         page.add(create_ui_text("0", 1, 4, cmd="0"))
-        
+
         page.add(create_ui_icon("uc:up-arrow", 3, 1, cmd="CHANNEL_UP"))
         page.add(create_ui_icon("uc:down-arrow", 3, 2, cmd="CHANNEL_DOWN"))
         page.add(create_ui_text("OK", 0, 5, size=Size(2, 1), cmd="SELECT"))
-        
+
         return page
 
     def _create_playback_page(self) -> UiPage:
+        """Create playback control UI page."""
         page = UiPage("playback", "Playback", grid=Size(4, 6))
-        
+
         page.add(create_ui_icon("uc:prev", 0, 1, size=Size(2, 2), cmd="REWIND"))
         page.add(create_ui_icon("uc:next", 2, 1, size=Size(2, 2), cmd="FASTFORWARD"))
-        
+
         page.add(create_ui_text("P/P", 0, 3, size=Size(2, 2), cmd="PLAYPAUSE"))
         page.add(create_ui_icon("uc:stop", 2, 3, cmd="STOP"))
         page.add(create_ui_text("REC", 3, 3, cmd="RECORD"))
-        
+
         page.add(create_ui_text("VOL+", 0, 5, cmd="VOLUME_UP"))
         page.add(create_ui_text("VOL-", 1, 5, cmd="VOLUME_DOWN"))
         page.add(create_ui_text("MUTE", 2, 5, size=Size(2, 1), cmd="MUTE"))
-        
+
         return page
 
     def _create_colors_page(self) -> UiPage:
+        """Create color buttons UI page."""
         page = UiPage("colors", "Color Buttons", grid=Size(4, 6))
-        
+
         page.add(create_ui_text("RED", 0, 1, size=Size(2, 2), cmd="RED"))
         page.add(create_ui_text("GREEN", 2, 1, size=Size(2, 2), cmd="GREEN"))
         page.add(create_ui_text("YELLOW", 0, 3, size=Size(2, 2), cmd="YELLOW"))
         page.add(create_ui_text("BLUE", 2, 3, size=Size(2, 2), cmd="BLUE"))
         page.add(create_ui_icon("uc:guide", 1, 5, size=Size(2, 1), cmd="GUIDE"))
-        
+
         return page
 
-    async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
+    async def _handle_command(
+        self, entity: Any, cmd_id: str, params: dict[str, Any] | None
+    ) -> StatusCodes:
+        """Handle remote commands."""
         _LOG.info("Remote command: %s (params=%s)", cmd_id, params)
 
         is_power_command = False
@@ -202,127 +216,105 @@ class HorizonRemote(Remote):
 
         try:
             if cmd_id == Commands.ON:
-                await self._client.power_on(self._device_id)
+                await self._horizon_device.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
                 is_power_command = True
-                
+
             elif cmd_id == Commands.OFF:
-                await self._client.power_off(self._device_id)
+                await self._horizon_device.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.OFF
                 is_power_command = True
-                
+
             elif cmd_id == Commands.TOGGLE:
-                await self._client.power_toggle(self._device_id)
+                await self._horizon_device.power_toggle(self._device_id)
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state == States.ON:
                     self.attributes[Attributes.STATE] = States.OFF
                 else:
                     self.attributes[Attributes.STATE] = States.ON
                 is_power_command = True
-                    
+
             elif cmd_id == Commands.SEND_CMD:
                 command = params.get("command") if params else None
                 if command:
-                    _LOG.info(f"SEND_CMD received: {command}")
-                    is_power_command, is_channel_command = await self._send_simple_command(command)
+                    is_power_command, is_channel_command = await self._send_simple_command(
+                        command
+                    )
                 else:
                     _LOG.warning("SEND_CMD without command parameter")
                     return StatusCodes.BAD_REQUEST
-                    
+
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # Power commands: immediate state update
             if is_power_command:
-                _LOG.debug("Power command - waiting 3s for MQTT, then updating state")
                 await asyncio.sleep(3.0)
                 await self.push_update()
-            
-            # Channel commands: schedule background update for media player
             elif is_channel_command:
-                _LOG.debug("Channel command - scheduling background media player update")
                 if self._channel_update_task and not self._channel_update_task.done():
                     self._channel_update_task.cancel()
-                self._channel_update_task = asyncio.create_task(self._delayed_channel_update())
-                # Update remote state immediately (no artwork, just state)
+                self._channel_update_task = asyncio.create_task(
+                    self._delayed_channel_update()
+                )
                 await self.push_update()
-            
-            # Other commands: just update remote state
             else:
                 await self.push_update()
-            
+
             return StatusCodes.OK
 
         except Exception as e:
             _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
-    async def _delayed_channel_update(self):
-        """
-        Background task to update media player artwork after channel change.
-        Waits for MQTT to propagate, then triggers media player refresh.
-        """
+    async def _delayed_channel_update(self) -> None:
+        """Background task to update media player after channel change."""
         try:
-            _LOG.debug("Delayed channel update: waiting 2.5s for MQTT propagation...")
             await asyncio.sleep(2.5)
             if self._media_player:
-                _LOG.debug("Delayed channel update: triggering media player artwork refresh")
                 await self._media_player.push_update()
         except asyncio.CancelledError:
-            _LOG.debug("Delayed channel update cancelled (new channel command)")
             raise
         except Exception as e:
             _LOG.error("Error in delayed channel update: %s", e)
 
     async def _send_simple_command(self, command: str) -> tuple[bool, bool]:
-        """
-        Send a simple command and return (is_power, is_channel) tuple.
-        
-        Returns:
-            tuple[bool, bool]: (is_power_command, is_channel_command)
-        """
-        _LOG.info(f"Processing simple command: {command}")
-        
-        is_power_command = False
-        is_channel_command = False
-        
+        """Send a simple command and return (is_power, is_channel) tuple."""
+        _LOG.info("Processing simple command: %s", command)
+
         if command.startswith("channel_select:"):
             channel = command.split(":", 1)[1]
-            _LOG.info(f"Channel select command: {channel}")
-            await self._client.set_channel(self._device_id, channel)
+            await self._horizon_device.set_channel_by_number(self._device_id, channel)
             return (False, True)
-        
+
         if command == "POWER_ON":
-            _LOG.info("Calling power_on()")
-            await self._client.power_on(self._device_id)
+            await self._horizon_device.power_on(self._device_id)
             return (True, False)
-            
+
         elif command == "POWER_OFF":
-            _LOG.info("Calling power_off()")
-            await self._client.power_off(self._device_id)
+            await self._horizon_device.power_off(self._device_id)
             return (True, False)
-            
+
         elif command == "POWER_TOGGLE":
-            _LOG.info("Calling power_toggle()")
-            await self._client.power_toggle(self._device_id)
+            await self._horizon_device.power_toggle(self._device_id)
             return (True, False)
-            
+
         elif command == "PLAYPAUSE":
-            _LOG.info("Calling play_pause_toggle()")
-            await self._client.play_pause_toggle(self._device_id)
+            state = await self._horizon_device.get_device_state(self._device_id)
+            if state.get("paused"):
+                await self._horizon_device.play(self._device_id)
+            else:
+                await self._horizon_device.pause(self._device_id)
             return (False, False)
-        
+
         elif command == "RECORD":
-            _LOG.info("Sending MediaRecord key")
-            await self._client.send_key(self._device_id, "MediaRecord")
+            await self._horizon_device.record(self._device_id)
             return (False, False)
-        
+
         elif command == "DVR":
-            _LOG.info("Sending DVR key")
-            await self._client.send_key(self._device_id, "DVR")
+            await self._horizon_device.send_key(self._device_id, "DVR")
             return (False, False)
-        
+
         command_map = {
             "UP": "ArrowUp",
             "DOWN": "ArrowDown",
@@ -347,51 +339,46 @@ class HorizonRemote(Remote):
             "TV": "TV",
             "MENU": "ContextMenu",
             "SOURCE": "Settings",
-            "DVR": "DVR",
         }
-        
+
         for i in range(10):
             command_map[str(i)] = str(i)
-        
+
         horizon_key = command_map.get(command)
-        
+
         if not horizon_key:
-            _LOG.warning(f"Unknown command: {command}")
+            _LOG.warning("Unknown command: %s", command)
             return (False, False)
-        
-        _LOG.info(f"Sending: {command} -> {horizon_key}")
-        await self._client.send_key(self._device_id, horizon_key)
-        
+
+        _LOG.info("Sending: %s -> %s", command, horizon_key)
+        await self._horizon_device.send_key(self._device_id, horizon_key)
+
         if command in ["CHANNEL_UP", "CHANNEL_DOWN"]:
             return (False, True)
-        
-        # Digit entry: schedule delayed update after final digit
+
         if command in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]:
             if self._digit_update_task and not self._digit_update_task.done():
                 self._digit_update_task.cancel()
-            
-            # Use same delayed update as channel commands (2.5s for MQTT + artwork)
             self._digit_update_task = asyncio.create_task(self._delayed_channel_update())
-        
+
         return (False, False)
 
     async def push_update(self) -> None:
-        if self._api and self._api.configured_entities.contains(self.id):
-            device_state = await self._client.get_device_state(self._device_id)
-            horizon_state = device_state.get("state", "unavailable")
-            
-            _LOG.debug(f"Remote device state for {self._device_id}: {horizon_state}")
-            
-            if horizon_state == "ONLINE_RUNNING":
-                self.attributes[Attributes.STATE] = States.ON
-            elif horizon_state == "ONLINE_STANDBY":
-                self.attributes[Attributes.STATE] = States.OFF
-            elif horizon_state in ["OFFLINE", "OFFLINE_NETWORK_STANDBY"]:
-                self.attributes[Attributes.STATE] = States.OFF
-                _LOG.debug(f"{self.id} - Device is OFF (state: {horizon_state})")
-            else:
-                self.attributes[Attributes.STATE] = States.UNAVAILABLE
-                _LOG.warning(f"{self.id} - Device is UNAVAILABLE (no MQTT communication)")
-            
-            self._api.configured_entities.update_attributes(self.id, self.attributes)
-            _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])
+        """Push state update to UC Remote."""
+        if not self._api or not self._api.configured_entities.contains(self.id):
+            return
+
+        device_state = await self._horizon_device.get_device_state(self._device_id)
+        horizon_state = device_state.get("state", "unavailable")
+
+        if horizon_state == "ONLINE_RUNNING":
+            self.attributes[Attributes.STATE] = States.ON
+        elif horizon_state == "ONLINE_STANDBY":
+            self.attributes[Attributes.STATE] = States.OFF
+        elif horizon_state == "OFFLINE":
+            self.attributes[Attributes.STATE] = States.OFF
+        else:
+            self.attributes[Attributes.STATE] = States.UNAVAILABLE
+
+        self._api.configured_entities.update_attributes(self.id, self.attributes)
+        _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])

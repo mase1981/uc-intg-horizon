@@ -5,36 +5,42 @@ Media Player entity for Horizon integration.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from ucapi import EntityTypes, MediaPlayer, StatusCodes
+from ucapi import MediaPlayer, StatusCodes
 from ucapi.media_player import Attributes, Commands, Features, States
 
-from uc_intg_horizon.client import HorizonClient
+if TYPE_CHECKING:
+    import ucapi
+    from uc_intg_horizon.device import HorizonDevice
 
 _LOG = logging.getLogger(__name__)
 
 
 class HorizonMediaPlayer(MediaPlayer):
+    """Media Player entity for a Horizon set-top box."""
 
     def __init__(
         self,
         device_id: str,
         device_name: str,
-        client: HorizonClient,
-        api,
-        sensors: list = None,
-    ):
+        horizon_device: HorizonDevice,
+        api: ucapi.IntegrationAPI,
+        sensors: list | None = None,
+    ) -> None:
+        """Initialize the media player entity."""
         self._device_id = device_id
-        self._client = client
+        self._horizon_device = horizon_device
         self._api = api
         self._sensors = sensors or []
-        self._refresh_task = None
-        self._channel_update_task = None
+        self._refresh_task: asyncio.Task | None = None
+        self._channel_update_task: asyncio.Task | None = None
 
         features = [
             Features.ON_OFF,
@@ -60,7 +66,7 @@ class HorizonMediaPlayer(MediaPlayer):
             Features.MEDIA_ARTIST,
             Features.MEDIA_IMAGE_URL,
             Features.MEDIA_POSITION,
-            # Features.SEEK,  # Disabled - requires lghorizon 0.9.1+ (currently beta)
+            Features.SEEK,
         ]
 
         attributes = {
@@ -84,40 +90,45 @@ class HorizonMediaPlayer(MediaPlayer):
         )
 
         _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
-        
+
         asyncio.create_task(self._load_sources())
         asyncio.create_task(self._start_periodic_refresh())
 
-    async def _load_sources(self):
+    async def _load_sources(self) -> None:
+        """Load available sources (channels)."""
         try:
-            sources = await self._client.get_sources(self._device_id)
-            source_list = [source["name"] for source in sources]
+            channels = await self._horizon_device.get_channels()
+            source_list = [ch["name"] for ch in channels]
             self.attributes[Attributes.SOURCE_LIST] = source_list
-            _LOG.info(f"Loaded {len(source_list)} sources for {self._device_id}")
+            _LOG.info("Loaded %d sources for %s", len(source_list), self._device_id)
         except Exception as e:
-            _LOG.error(f"Failed to load sources: {e}")
+            _LOG.error("Failed to load sources: %s", e)
 
-    async def _start_periodic_refresh(self):
-        _LOG.info(f"Starting 15-second periodic refresh for {self._device_id}")
-        
+    async def _start_periodic_refresh(self) -> None:
+        """Start periodic state refresh."""
+        _LOG.info("Starting 15-second periodic refresh for %s", self._device_id)
+
         await asyncio.sleep(15)
-        
+
         while True:
             try:
                 if self._api and self._api.configured_entities.contains(self.id):
-                    _LOG.debug(f"Periodic refresh triggered for {self._device_id}")
+                    _LOG.debug("Periodic refresh for %s", self._device_id)
                     await self.push_update()
-                
-                await asyncio.sleep(15)
-                
-            except asyncio.CancelledError:
-                _LOG.info(f"Periodic refresh stopped for {self._device_id}")
-                break
-            except Exception as e:
-                _LOG.error(f"Error in periodic refresh for {self._device_id}: {e}")
+
                 await asyncio.sleep(15)
 
-    async def _handle_command(self, entity, cmd_id: str, params: dict[str, Any] | None) -> StatusCodes:
+            except asyncio.CancelledError:
+                _LOG.info("Periodic refresh stopped for %s", self._device_id)
+                break
+            except Exception as e:
+                _LOG.error("Error in periodic refresh for %s: %s", self._device_id, e)
+                await asyncio.sleep(15)
+
+    async def _handle_command(
+        self, entity: Any, cmd_id: str, params: dict[str, Any] | None
+    ) -> StatusCodes:
+        """Handle media player commands."""
         _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
 
         is_power_command = False
@@ -125,20 +136,17 @@ class HorizonMediaPlayer(MediaPlayer):
 
         try:
             if cmd_id == Commands.ON:
-                _LOG.info("Media Player: Powering on")
-                await self._client.power_on(self._device_id)
+                await self._horizon_device.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
                 is_power_command = True
-                
+
             elif cmd_id == Commands.OFF:
-                _LOG.info("Media Player: Powering off")
-                await self._client.power_off(self._device_id)
+                await self._horizon_device.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.STANDBY
                 is_power_command = True
-                
+
             elif cmd_id == Commands.TOGGLE:
-                _LOG.info("Media Player: Toggling power")
-                await self._client.power_toggle(self._device_id)
+                await self._horizon_device.power_toggle(self._device_id)
                 current_state = self.attributes.get(Attributes.STATE)
                 if current_state in [States.ON, States.PLAYING, States.PAUSED]:
                     self.attributes[Attributes.STATE] = States.STANDBY
@@ -147,320 +155,264 @@ class HorizonMediaPlayer(MediaPlayer):
                 is_power_command = True
 
             elif cmd_id == Commands.PLAY_PAUSE:
-                _LOG.info("Media Player: Play/Pause toggle")
-                await self._client.play_pause_toggle(self._device_id)
-                current_state = self.attributes.get(Attributes.STATE)
-                if current_state == States.PLAYING:
-                    self.attributes[Attributes.STATE] = States.PAUSED
-                else:
+                state = await self._horizon_device.get_device_state(self._device_id)
+                if state.get("paused"):
+                    await self._horizon_device.play(self._device_id)
                     self.attributes[Attributes.STATE] = States.PLAYING
-                
-            elif cmd_id == Commands.STOP:
-                _LOG.info("Media Player: Stop")
-                await self._client.stop(self._device_id)
-                self.attributes[Attributes.STATE] = States.ON
-                
-            elif cmd_id == Commands.NEXT:
-                _LOG.info("Media Player: Next channel")
-                await self._client.next_channel(self._device_id)
-                is_channel_command = True
-                
-            elif cmd_id == Commands.PREVIOUS:
-                _LOG.info("Media Player: Previous channel")
-                await self._client.previous_channel(self._device_id)
-                is_channel_command = True
-                
-            elif cmd_id == Commands.FAST_FORWARD:
-                _LOG.info("Media Player: Fast forward")
-                await self._client.fast_forward(self._device_id)
-                
-            elif cmd_id == Commands.REWIND:
-                _LOG.info("Media Player: Rewind")
-                await self._client.rewind(self._device_id)
-                
-            elif cmd_id == Commands.RECORD:
-                _LOG.info("Media Player: Record -> MediaRecord")
-                await self._client.send_key(self._device_id, "MediaRecord")
+                else:
+                    await self._horizon_device.pause(self._device_id)
+                    self.attributes[Attributes.STATE] = States.PAUSED
 
-            # SEEK disabled - requires lghorizon 0.9.1+ (currently beta)
-            # elif cmd_id == Commands.SEEK:
-            #     if params and "media_position" in params:
-            #         position_seconds = params["media_position"]
-            #         _LOG.info(f"Media Player: Seek to position {position_seconds}s")
-            #         success = await self._client.seek(self._device_id, position_seconds)
-            #         if success:
-            #             self.attributes[Attributes.MEDIA_POSITION] = int(position_seconds)
-            #         return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
-            #     else:
-            #         _LOG.warning("SEEK called without media_position parameter")
-            #         return StatusCodes.BAD_REQUEST
+            elif cmd_id == Commands.STOP:
+                await self._horizon_device.stop(self._device_id)
+                self.attributes[Attributes.STATE] = States.ON
+
+            elif cmd_id == Commands.NEXT:
+                await self._horizon_device.next_channel(self._device_id)
+                is_channel_command = True
+
+            elif cmd_id == Commands.PREVIOUS:
+                await self._horizon_device.previous_channel(self._device_id)
+                is_channel_command = True
+
+            elif cmd_id == Commands.FAST_FORWARD:
+                await self._horizon_device.fast_forward(self._device_id)
+
+            elif cmd_id == Commands.REWIND:
+                await self._horizon_device.rewind(self._device_id)
+
+            elif cmd_id == Commands.RECORD:
+                await self._horizon_device.record(self._device_id)
+
+            elif cmd_id == Commands.SEEK:
+                if params and "media_position" in params:
+                    position = int(params["media_position"])
+                    success = await self._horizon_device.seek(self._device_id, position)
+                    if success:
+                        self.attributes[Attributes.MEDIA_POSITION] = position
+                    return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
+                else:
+                    _LOG.warning("SEEK called without media_position parameter")
+                    return StatusCodes.BAD_REQUEST
 
             elif cmd_id == Commands.VOLUME_UP:
-                _LOG.info("Media Player: Volume up -> VolumeUp")
-                await self._client.send_key(self._device_id, "VolumeUp")
-                
+                await self._horizon_device.send_key(self._device_id, "VolumeUp")
+
             elif cmd_id == Commands.VOLUME_DOWN:
-                _LOG.info("Media Player: Volume down -> VolumeDown")
-                await self._client.send_key(self._device_id, "VolumeDown")
-                
+                await self._horizon_device.send_key(self._device_id, "VolumeDown")
+
             elif cmd_id == Commands.MUTE_TOGGLE:
-                _LOG.info("Media Player: Mute toggle -> VolumeMute")
-                await self._client.send_key(self._device_id, "VolumeMute")
+                await self._horizon_device.send_key(self._device_id, "VolumeMute")
                 muted = self.attributes.get(Attributes.MUTED, False)
                 self.attributes[Attributes.MUTED] = not muted
 
             elif cmd_id == Commands.CURSOR_UP:
-                _LOG.info("Media Player: Cursor up -> ArrowUp")
-                await self._client.send_key(self._device_id, "ArrowUp")
-                
+                await self._horizon_device.send_key(self._device_id, "ArrowUp")
+
             elif cmd_id == Commands.CURSOR_DOWN:
-                _LOG.info("Media Player: Cursor down -> ArrowDown")
-                await self._client.send_key(self._device_id, "ArrowDown")
-                
+                await self._horizon_device.send_key(self._device_id, "ArrowDown")
+
             elif cmd_id == Commands.CURSOR_LEFT:
-                _LOG.info("Media Player: Cursor left -> ArrowLeft")
-                await self._client.send_key(self._device_id, "ArrowLeft")
-                
+                await self._horizon_device.send_key(self._device_id, "ArrowLeft")
+
             elif cmd_id == Commands.CURSOR_RIGHT:
-                _LOG.info("Media Player: Cursor right -> ArrowRight")
-                await self._client.send_key(self._device_id, "ArrowRight")
-                
+                await self._horizon_device.send_key(self._device_id, "ArrowRight")
+
             elif cmd_id == Commands.CURSOR_ENTER:
-                _LOG.info("Media Player: Cursor enter -> Enter")
-                await self._client.send_key(self._device_id, "Enter")
+                await self._horizon_device.send_key(self._device_id, "Enter")
 
             elif cmd_id == Commands.HOME:
-                _LOG.info("Media Player: Home -> MediaTopMenu")
-                await self._client.send_key(self._device_id, "MediaTopMenu")
-                
+                await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
+
             elif cmd_id == Commands.MENU:
-                _LOG.info("Media Player: Menu -> Info")
-                await self._client.send_key(self._device_id, "Info")
-                
+                await self._horizon_device.send_key(self._device_id, "Info")
+
             elif cmd_id == Commands.CONTEXT_MENU:
-                _LOG.info("Media Player: Context menu -> Options")
-                await self._client.send_key(self._device_id, "Options")
-                
+                await self._horizon_device.send_key(self._device_id, "Options")
+
             elif cmd_id == Commands.GUIDE:
-                _LOG.info("Media Player: Guide -> Guide")
-                await self._client.send_key(self._device_id, "Guide")
-                
+                await self._horizon_device.send_key(self._device_id, "Guide")
+
             elif cmd_id == Commands.INFO:
-                _LOG.info("Media Player: Info -> Info")
-                await self._client.send_key(self._device_id, "Info")
-                
+                await self._horizon_device.send_key(self._device_id, "Info")
+
             elif cmd_id == Commands.BACK:
-                _LOG.info("Media Player: Back -> Escape")
-                await self._client.send_key(self._device_id, "Escape")
+                await self._horizon_device.send_key(self._device_id, "Escape")
 
             elif cmd_id == Commands.CHANNEL_UP:
-                _LOG.info("Media Player: Channel up")
-                await self._client.next_channel(self._device_id)
+                await self._horizon_device.next_channel(self._device_id)
                 is_channel_command = True
-                
+
             elif cmd_id == Commands.CHANNEL_DOWN:
-                _LOG.info("Media Player: Channel down")
-                await self._client.previous_channel(self._device_id)
+                await self._horizon_device.previous_channel(self._device_id)
                 is_channel_command = True
-                
+
             elif cmd_id == Commands.SELECT_SOURCE:
                 if params and "source" in params:
                     source = params["source"]
-                    _LOG.info(f"Media Player: Select source: {source}")
-                    
+                    _LOG.info("Select source: %s", source)
+
                     if source.startswith("HDMI") or source == "AV Input":
-                        await self._client.send_key(self._device_id, "Settings")
-                        _LOG.info("Opened settings for input selection")
-                    elif source in ["Netflix", "BBC iPlayer", "ITVX", "All 4", "My5", "Prime Video", "YouTube", "Disney+"]:
-                        await self._client.play_media(self._device_id, "app", source)
-                        _LOG.info(f"Launched app: {source}")
+                        await self._horizon_device.send_key(self._device_id, "Settings")
+                    elif source in [
+                        "Netflix", "BBC iPlayer", "ITVX", "All 4", "My5",
+                        "Prime Video", "YouTube", "Disney+",
+                    ]:
+                        await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
                     else:
-                        await self._client.set_channel(self._device_id, source)
+                        await self._horizon_device.set_channel(self._device_id, source)
                         is_channel_command = True
-                    
+
                     self.attributes[Attributes.SOURCE] = source
                 else:
                     _LOG.warning("SELECT_SOURCE called without source parameter")
                     return StatusCodes.BAD_REQUEST
 
             elif cmd_id == "my_recordings":
-                _LOG.info("Media Player: My Recordings -> Recordings")
-                await self._client.send_key(self._device_id, "Recordings")
+                await self._horizon_device.send_key(self._device_id, "Recordings")
 
             elif cmd_id.startswith("channel_select:"):
                 channel = cmd_id.split(":", 1)[1]
-                _LOG.info(f"Media Player: Channel select -> {channel}")
-                await self._client.set_channel(self._device_id, channel)
+                await self._horizon_device.set_channel_by_number(self._device_id, channel)
                 is_channel_command = True
 
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            # Power commands: immediate state update (need instant feedback)
             if is_power_command:
-                _LOG.debug("Power command - waiting 3s for MQTT, then updating state")
                 await asyncio.sleep(3.0)
                 await self.push_update()
-            
-            # Channel commands: schedule background update (don't block user)
             elif is_channel_command:
-                _LOG.debug("Channel command - scheduling background artwork update")
                 if self._channel_update_task and not self._channel_update_task.done():
                     self._channel_update_task.cancel()
-                self._channel_update_task = asyncio.create_task(self._delayed_channel_update())
-            
-            # Other commands: no update (periodic refresh handles it)
-            
+                self._channel_update_task = asyncio.create_task(
+                    self._delayed_channel_update()
+                )
+
             return StatusCodes.OK
 
         except Exception as e:
             _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
-    async def _delayed_channel_update(self):
-        """
-        Background task to update artwork after channel change.
-        Waits for MQTT to propagate new channel state, then refreshes.
-        """
+    async def _delayed_channel_update(self) -> None:
+        """Background task to update artwork after channel change."""
         try:
-            _LOG.debug("Delayed channel update: waiting 2.5s for MQTT propagation...")
             await asyncio.sleep(2.5)
-            _LOG.debug("Delayed channel update: fetching new artwork")
             await self.push_update()
         except asyncio.CancelledError:
-            _LOG.debug("Delayed channel update cancelled (new channel command)")
             raise
         except Exception as e:
             _LOG.error("Error in delayed channel update: %s", e)
 
-    def _calculate_position_duration(self, start_time, end_time, position=None):
+    def _calculate_position_duration(
+        self,
+        start_time: Any,
+        end_time: Any,
+        position: int | None = None,
+    ) -> tuple[int, int]:
+        """Calculate media position and duration."""
         try:
-            if position is not None:
-                if start_time and end_time:
-                    if isinstance(start_time, (int, float)):
-                        start_dt = datetime.fromtimestamp(start_time)
-                    else:
-                        start_dt = datetime.fromisoformat(str(start_time))
-                    
-                    if isinstance(end_time, (int, float)):
-                        end_dt = datetime.fromtimestamp(end_time)
-                    else:
-                        end_dt = datetime.fromisoformat(str(end_time))
-                    
-                    duration = int((end_dt - start_dt).total_seconds())
-                    return (int(position), duration)
-            
-            if start_time and end_time:
-                now = datetime.now()
-                
+            if position is not None and start_time and end_time:
                 if isinstance(start_time, (int, float)):
                     start_dt = datetime.fromtimestamp(start_time)
                 else:
                     start_dt = datetime.fromisoformat(str(start_time))
-                
+
                 if isinstance(end_time, (int, float)):
                     end_dt = datetime.fromtimestamp(end_time)
                 else:
                     end_dt = datetime.fromisoformat(str(end_time))
-                
+
+                duration = int((end_dt - start_dt).total_seconds())
+                return (int(position), duration)
+
+            if start_time and end_time:
+                now = datetime.now()
+
+                if isinstance(start_time, (int, float)):
+                    start_dt = datetime.fromtimestamp(start_time)
+                else:
+                    start_dt = datetime.fromisoformat(str(start_time))
+
+                if isinstance(end_time, (int, float)):
+                    end_dt = datetime.fromtimestamp(end_time)
+                else:
+                    end_dt = datetime.fromisoformat(str(end_time))
+
                 position_seconds = int((now - start_dt).total_seconds())
                 duration_seconds = int((end_dt - start_dt).total_seconds())
                 position_seconds = max(0, min(position_seconds, duration_seconds))
-                
-                _LOG.debug(
-                    "Calculated position: %d/%d seconds (%.1f%%)",
-                    position_seconds,
-                    duration_seconds,
-                    (position_seconds / duration_seconds * 100) if duration_seconds > 0 else 0
-                )
-                
+
                 return (position_seconds, duration_seconds)
-                
+
         except Exception as e:
             _LOG.debug("Could not calculate position/duration: %s", e)
-        
+
         return (0, 0)
 
     def _make_unique_image_url(self, base_url: str) -> str:
-        """
-        Add unique query parameter to image URL to force refresh in R3 firmware.
-        
-        R3 firmware requires unique URLs for artwork to refresh properly.
-        We append a timestamp-based dummy parameter to make each URL unique.
-        
-        :param base_url: Original image URL
-        :return: URL with unique query parameter
-        """
+        """Add unique query parameter to force image refresh."""
         if not base_url:
             return base_url
-            
+
         separator = "&" if "?" in base_url else "?"
         timestamp = int(time.time() * 1000)
-        unique_url = f"{base_url}{separator}_t={timestamp}"
-        
-        _LOG.debug("Artwork URL: %s -> %s", base_url[:50], unique_url[:70])
-        return unique_url
+        return f"{base_url}{separator}_t={timestamp}"
 
     async def push_update(self) -> None:
-        if self._api and self._api.configured_entities.contains(self.id):
-            device_state = await self._client.get_device_state(self._device_id)
-            horizon_state = device_state.get("state", "unavailable")
-            
-            if horizon_state == "ONLINE_RUNNING":
-                self.attributes[Attributes.STATE] = States.PLAYING
-            elif horizon_state == "ONLINE_STANDBY":
-                self.attributes[Attributes.STATE] = States.STANDBY
-            elif horizon_state in ["OFFLINE", "OFFLINE_NETWORK_STANDBY"]:
-                self.attributes[Attributes.STATE] = States.OFF
-            else:
-                self.attributes[Attributes.STATE] = States.UNAVAILABLE
-            
-            channel_name = device_state.get("channel", "")
-            program_title = device_state.get("media_title", "")
-            
-            if program_title:
-                self.attributes[Attributes.MEDIA_TITLE] = program_title
-                self.attributes[Attributes.MEDIA_ARTIST] = channel_name
-                
-                _LOG.debug(
-                    "Media display - Line 1: '%s', Line 2: '%s'",
-                    program_title,
-                    channel_name
-                )
-            elif channel_name:
-                self.attributes[Attributes.MEDIA_TITLE] = channel_name
-                self.attributes[Attributes.MEDIA_ARTIST] = ""
-            else:
-                self.attributes[Attributes.MEDIA_TITLE] = ""
-                self.attributes[Attributes.MEDIA_ARTIST] = ""
-            
-            if device_state.get("media_image"):
-                original_url = device_state["media_image"]
-                unique_url = self._make_unique_image_url(original_url)
-                self.attributes[Attributes.MEDIA_IMAGE_URL] = unique_url
-            
-            start_time = device_state.get("start_time")
-            end_time = device_state.get("end_time")
-            position = device_state.get("position")
-            
-            if start_time and end_time:
-                pos, dur = self._calculate_position_duration(start_time, end_time, position)
-                self.attributes[Attributes.MEDIA_POSITION] = pos
-                self.attributes[Attributes.MEDIA_DURATION] = dur
-                
-                _LOG.debug(
-                    "Seek bar - Position: %d/%d seconds (%.1f%%)",
-                    pos,
-                    dur,
-                    (pos / dur * 100) if dur > 0 else 0
-                )
-            else:
-                self.attributes[Attributes.MEDIA_POSITION] = 0
-                self.attributes[Attributes.MEDIA_DURATION] = 0
-            
-            self._api.configured_entities.update_attributes(self.id, self.attributes)
-            _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])
+        """Push state update to UC Remote."""
+        if not self._api or not self._api.configured_entities.contains(self.id):
+            return
 
-            for sensor in self._sensors:
-                await sensor.update_state(device_state)
+        device_state = await self._horizon_device.get_device_state(self._device_id)
+        horizon_state = device_state.get("state", "unavailable")
+
+        if horizon_state == "ONLINE_RUNNING":
+            if device_state.get("paused"):
+                self.attributes[Attributes.STATE] = States.PAUSED
+            else:
+                self.attributes[Attributes.STATE] = States.PLAYING
+        elif horizon_state == "ONLINE_STANDBY":
+            self.attributes[Attributes.STATE] = States.STANDBY
+        elif horizon_state == "OFFLINE":
+            self.attributes[Attributes.STATE] = States.OFF
+        else:
+            self.attributes[Attributes.STATE] = States.UNAVAILABLE
+
+        channel_name = device_state.get("channel", "")
+        program_title = device_state.get("media_title", "")
+
+        if program_title:
+            self.attributes[Attributes.MEDIA_TITLE] = program_title
+            self.attributes[Attributes.MEDIA_ARTIST] = channel_name
+        elif channel_name:
+            self.attributes[Attributes.MEDIA_TITLE] = channel_name
+            self.attributes[Attributes.MEDIA_ARTIST] = ""
+        else:
+            self.attributes[Attributes.MEDIA_TITLE] = ""
+            self.attributes[Attributes.MEDIA_ARTIST] = ""
+
+        if device_state.get("media_image"):
+            original_url = device_state["media_image"]
+            unique_url = self._make_unique_image_url(original_url)
+            self.attributes[Attributes.MEDIA_IMAGE_URL] = unique_url
+
+        start_time = device_state.get("start_time")
+        end_time = device_state.get("end_time")
+        position = device_state.get("position")
+
+        if start_time and end_time:
+            pos, dur = self._calculate_position_duration(start_time, end_time, position)
+            self.attributes[Attributes.MEDIA_POSITION] = pos
+            self.attributes[Attributes.MEDIA_DURATION] = dur
+        else:
+            self.attributes[Attributes.MEDIA_POSITION] = 0
+            self.attributes[Attributes.MEDIA_DURATION] = 0
+
+        self._api.configured_entities.update_attributes(self.id, self.attributes)
+        _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])
+
+        for sensor in self._sensors:
+            await sensor.update_state(device_state)
