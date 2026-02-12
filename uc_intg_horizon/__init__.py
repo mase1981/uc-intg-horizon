@@ -13,7 +13,11 @@ import json
 import logging
 from pathlib import Path
 
+from ucapi_framework import BaseConfigManager, get_config_path
+
+from uc_intg_horizon.config import HorizonConfig
 from uc_intg_horizon.driver import HorizonDriver
+from uc_intg_horizon.setup_flow import HorizonSetupFlow
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
@@ -38,22 +42,33 @@ _LOG = logging.getLogger(__name__)
 async def main() -> None:
     """Main entry point for the integration."""
     _LOG.info("=" * 70)
-    _LOG.info("LG Horizon Integration v%s", __version__)
+    _LOG.info("LG Horizon Integration v%s (ucapi-framework)", __version__)
     _LOG.info("=" * 70)
 
-    loop = asyncio.get_running_loop()
-    driver = HorizonDriver(loop)
+    driver = HorizonDriver()
 
-    try:
-        await driver.start()
-        await asyncio.Future()
-    except asyncio.CancelledError:
-        _LOG.info("Integration cancelled")
-    except Exception as e:
-        _LOG.error("Fatal error: %s", e, exc_info=True)
-        raise
-    finally:
-        await driver.stop()
+    config_path = get_config_path(driver.api.config_dir_path or "")
+    config_manager = BaseConfigManager(
+        config_path,
+        add_handler=driver.on_device_added,
+        remove_handler=driver.on_device_removed,
+        config_class=HorizonConfig,
+    )
+    driver.config_manager = config_manager
+
+    setup_handler = HorizonSetupFlow.create_handler(driver)
+    await driver.api.init("driver.json", setup_handler)
+
+    await driver.register_all_configured_devices(connect=False)
+
+    configs = list(config_manager.all())
+    if configs:
+        _LOG.info("Connecting %d configured device(s)...", len(configs))
+        await driver.connect_devices()
+    else:
+        _LOG.info("No configured devices - waiting for setup")
+
+    await asyncio.Future()
 
 
 def run() -> None:

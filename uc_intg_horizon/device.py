@@ -10,17 +10,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any, Callable, Coroutine
+from enum import StrEnum
+from typing import Any
 
 import aiohttp
 import certifi
+from pyee.asyncio import AsyncIOEventEmitter
 
 from lghorizon import (
     COUNTRY_SETTINGS,
     LGHorizonApi,
     LGHorizonAuth,
     LGHorizonDevice as LGDevice,
-    LGHorizonDeviceState,
     LGHorizonRunningState,
 )
 
@@ -37,11 +38,22 @@ PROVIDER_TO_COUNTRY = {
 }
 
 
+class DeviceEvents(StrEnum):
+    """Device event types for ucapi-framework integration."""
+
+    CONNECTING = "DEVICE_CONNECTING"
+    CONNECTED = "DEVICE_CONNECTED"
+    DISCONNECTED = "DEVICE_DISCONNECTED"
+    ERROR = "DEVICE_ERROR"
+    UPDATE = "DEVICE_UPDATE"
+
+
 class HorizonDevice:
     """
-    Wrapper for lghorizon 0.9.11 API.
+    Wrapper for lghorizon 0.9.11 API with ucapi-framework event support.
 
     Uses ExternalClientDevice pattern - lghorizon manages its own MQTT connection.
+    Emits events for state changes that entities can subscribe to.
     """
 
     def __init__(self, config: HorizonConfig) -> None:
@@ -52,8 +64,9 @@ class HorizonDevice:
         self._api: LGHorizonApi | None = None
         self._devices: dict[str, LGDevice] = {}
         self._connected = False
-        self._state_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None
         self._reconnect_task: asyncio.Task | None = None
+
+        self.events = AsyncIOEventEmitter()
 
         os.environ["SSL_CERT_FILE"] = certifi.where()
         os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -66,6 +79,16 @@ class HorizonDevice:
         )
 
     @property
+    def identifier(self) -> str:
+        """Return the config identifier."""
+        return self._config.identifier
+
+    @property
+    def name(self) -> str:
+        """Return the config name."""
+        return self._config.name
+
+    @property
     def is_connected(self) -> bool:
         """Return True if connected to Horizon API."""
         return self._connected and self._api is not None
@@ -74,6 +97,11 @@ class HorizonDevice:
     def devices(self) -> dict[str, LGDevice]:
         """Return discovered devices."""
         return self._devices
+
+    @property
+    def config(self) -> HorizonConfig:
+        """Return the device configuration."""
+        return self._config
 
     async def connect(self) -> bool:
         """Connect to Horizon API using lghorizon 0.9.11."""
@@ -84,8 +112,11 @@ class HorizonDevice:
                 self._config.username,
             )
 
+            self.events.emit(DeviceEvents.CONNECTING, self.identifier)
+
             if self._country_code not in COUNTRY_SETTINGS:
                 _LOG.error("Unsupported country code: %s", self._country_code)
+                self.events.emit(DeviceEvents.ERROR, self.identifier, "Unsupported country")
                 return False
 
             country_config = COUNTRY_SETTINGS[self._country_code]
@@ -127,6 +158,7 @@ class HorizonDevice:
                 await device.set_callback(self._on_device_state_change)
 
             self._connected = True
+            self.events.emit(DeviceEvents.CONNECTED, self.identifier)
             _LOG.info(
                 "Connected to Horizon API successfully. Devices found: %d",
                 len(self._devices),
@@ -137,6 +169,7 @@ class HorizonDevice:
         except Exception as e:
             _LOG.error("Failed to connect to Horizon API: %s", e, exc_info=True)
             self._connected = False
+            self.events.emit(DeviceEvents.ERROR, self.identifier, str(e))
             await self._cleanup_session()
             return False
 
@@ -158,6 +191,7 @@ class HorizonDevice:
 
             self._devices = {}
             self._connected = False
+            self.events.emit(DeviceEvents.DISCONNECTED, self.identifier)
             _LOG.info("Disconnected from Horizon API")
 
         except Exception as e:
@@ -170,16 +204,10 @@ class HorizonDevice:
         self._session = None
 
     async def _on_device_state_change(self, device_id: str) -> None:
-        """Handle device state change callback from lghorizon."""
+        """Handle device state change callback from lghorizon MQTT."""
         _LOG.debug("Device state changed: %s", device_id)
-        if self._state_callback:
-            await self._state_callback(device_id)
-
-    def set_state_callback(
-        self, callback: Callable[[str], Coroutine[Any, Any, None]]
-    ) -> None:
-        """Set callback for device state changes."""
-        self._state_callback = callback
+        state = await self.get_device_state(device_id)
+        self.events.emit(DeviceEvents.UPDATE, device_id, state)
 
     async def get_device(self, device_id: str) -> LGDevice | None:
         """Get a specific device by ID."""
@@ -225,9 +253,7 @@ class HorizonDevice:
             _LOG.error("Failed to get state for %s: %s", device_id, e)
             return {"state": "unavailable"}
 
-    def _running_state_to_string(
-        self, state: LGHorizonRunningState | None
-    ) -> str:
+    def _running_state_to_string(self, state: LGHorizonRunningState | None) -> str:
         """Convert LGHorizonRunningState enum to string."""
         if state is None:
             return "unavailable"
@@ -375,7 +401,7 @@ class HorizonDevice:
             return False
 
     async def seek(self, device_id: str, position_seconds: int) -> bool:
-        """Seek to position on a device (NEW in 0.9.11)."""
+        """Seek to position on a device."""
         device = await self.get_device(device_id)
         if not device:
             return False
@@ -446,10 +472,7 @@ class HorizonDevice:
 
         try:
             channels = await self._api.get_profile_channels()
-            return [
-                {"id": ch.id, "name": ch.title}
-                for ch in channels.values()
-            ]
+            return [{"id": ch.id, "name": ch.title} for ch in channels.values()]
         except Exception as e:
             _LOG.error("Failed to get channels: %s", e)
             return []

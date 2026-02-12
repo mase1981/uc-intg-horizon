@@ -1,5 +1,5 @@
 """
-Setup flow for Horizon integration.
+Setup flow for Horizon integration using ucapi-framework.
 
 :copyright: (c) 2025 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
@@ -9,92 +9,77 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import Any
 
-from ucapi.api_definitions import (
-    AbortDriverSetup,
-    DriverSetupRequest,
-    IntegrationSetupError,
-    SetupAction,
-    SetupComplete,
-    SetupError,
-    UserDataResponse,
-)
+from ucapi import RequestUserInput
+from ucapi_framework import BaseSetupFlow
 
 from uc_intg_horizon.config import HorizonConfig
 from uc_intg_horizon.device import HorizonDevice
 
-if TYPE_CHECKING:
-    from uc_intg_horizon.driver import HorizonDriver
-
 _LOG = logging.getLogger(__name__)
 
 
-class HorizonSetupFlow:
-    """Setup flow handler for Horizon integration."""
+class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
+    """Setup flow for Horizon integration using driver.json schema."""
 
-    def __init__(self, driver: HorizonDriver) -> None:
-        """Initialize the setup flow."""
-        self._driver = driver
-        self._setup_device: HorizonDevice | None = None
+    def get_manual_entry_form(self) -> RequestUserInput | None:
+        """Return None to use driver.json setup_data_schema."""
+        return None
 
-    async def handle_setup(self, msg: SetupAction) -> SetupAction:
-        """Handle setup messages."""
-        if isinstance(msg, DriverSetupRequest):
-            return await self._handle_driver_setup(msg)
-        elif isinstance(msg, UserDataResponse):
-            return await self._handle_user_data(msg)
-        elif isinstance(msg, AbortDriverSetup):
-            return await self._handle_abort(msg)
-        else:
-            _LOG.warning("Unknown setup message type: %s", type(msg))
-            return SetupError(IntegrationSetupError.OTHER)
+    async def query_device(
+        self, input_values: dict[str, Any]
+    ) -> HorizonConfig | RequestUserInput:
+        """
+        Validate connection and discover devices.
 
-    async def _handle_driver_setup(self, msg: DriverSetupRequest) -> SetupAction:
-        """Handle driver setup request with device discovery."""
-        _LOG.info("Starting driver setup (reconfigure=%s)", msg.reconfigure)
+        Called after user provides credentials via driver.json schema.
+        """
+        provider = input_values.get("provider")
+        username = input_values.get("username")
+        password = input_values.get("password")
+
+        if not all([provider, username, password]):
+            raise ValueError("Missing required fields: provider, username, password")
+
+        config_id = (
+            f"{provider}_{username}".lower().replace("@", "_").replace(".", "_")
+        )
+
+        config = HorizonConfig(
+            identifier=config_id,
+            name=f"Horizon ({provider})",
+            provider=provider,
+            username=username,
+            password=password,
+        )
+
+        _LOG.info("Testing connection to Horizon API (provider=%s)...", provider)
+
+        test_device = HorizonDevice(config)
 
         try:
-            setup_data = msg.setup_data
-            provider = setup_data.get("provider")
-            username = setup_data.get("username")
-            password = setup_data.get("password")
-
-            if not all([provider, username, password]):
-                _LOG.error("Missing required setup fields")
-                return SetupError(IntegrationSetupError.OTHER)
-
-            config_id = f"{provider}_{username}".lower().replace("@", "_").replace(".", "_")
-            config = HorizonConfig(
-                identifier=config_id,
-                name=f"Horizon ({provider})",
-                provider=provider,
-                username=username,
-                password=password,
-            )
-
-            _LOG.info("Testing connection to Horizon API...")
-            self._setup_device = HorizonDevice(config)
-
-            if not await self._setup_device.connect():
-                _LOG.error("Failed to connect to Horizon API")
-                await self._cleanup_setup_device()
-                return SetupError(IntegrationSetupError.CONNECTION_REFUSED)
+            if not await test_device.connect():
+                raise ValueError(
+                    f"Failed to connect to Horizon API\n"
+                    f"Please verify your credentials for {provider}"
+                )
 
             _LOG.info("Connection successful - waiting for device states...")
             await asyncio.sleep(5)
 
-            api_devices = self._setup_device.devices
-
+            api_devices = test_device.devices
             if not api_devices:
-                _LOG.warning("No devices found in account")
-                await self._cleanup_setup_device()
-                return SetupError(IntegrationSetupError.NOT_FOUND)
+                await test_device.disconnect()
+                raise ValueError(
+                    "No devices found in your account\n"
+                    "Please verify your account has active set-top boxes"
+                )
 
-            _LOG.info("Found %d total devices from API", len(api_devices))
+            _LOG.info("Found %d devices from API", len(api_devices))
 
-            available_devices = []
-            unavailable_devices = []
+            available_count = 0
+            unavailable_count = 0
 
             for device_id, device in api_devices.items():
                 device_name = device.device_friendly_name
@@ -102,7 +87,8 @@ class HorizonSetupFlow:
                 running_state = state.state if state else None
 
                 if running_state is not None:
-                    available_devices.append((device_id, device_name, running_state))
+                    config.add_device(device_id, device_name)
+                    available_count += 1
                     _LOG.info(
                         "  AVAILABLE: %s (%s) - State: %s",
                         device_name,
@@ -110,63 +96,43 @@ class HorizonSetupFlow:
                         running_state,
                     )
                 else:
-                    unavailable_devices.append((device_id, device_name))
+                    unavailable_count += 1
                     _LOG.warning(
-                        "  UNAVAILABLE: %s (%s) - No MQTT state",
+                        "  UNAVAILABLE: %s (%s) - No MQTT state (device may be offline)",
                         device_name,
                         device_id,
                     )
 
-            if unavailable_devices:
+            if unavailable_count > 0:
                 _LOG.warning(
-                    "Found %d UNAVAILABLE device(s) not reporting to MQTT",
-                    len(unavailable_devices),
+                    "%d device(s) unavailable (not reporting to MQTT)",
+                    unavailable_count,
                 )
 
-            if not available_devices:
-                _LOG.error("No AVAILABLE devices found")
-                await self._cleanup_setup_device()
-                return SetupError(IntegrationSetupError.NOT_FOUND)
+            if not config.devices:
+                await test_device.disconnect()
+                raise ValueError(
+                    "No available devices found\n"
+                    "All devices appear to be offline or not connected to MQTT"
+                )
 
-            for device_id, device_name, _ in available_devices:
-                config.add_device(device_id, device_name)
-                _LOG.info("  Added device: %s (%s)", device_name, device_id)
-
-            refreshed_token = self._setup_device.get_refreshed_token()
+            refreshed_token = test_device.get_refreshed_token()
             if refreshed_token and refreshed_token != password:
-                _LOG.info("Token was refreshed during connection, updating config")
+                _LOG.info("Token was refreshed during connection - updating config")
                 config.password = refreshed_token
 
-            await self._cleanup_setup_device()
-
-            self._driver.config_manager.add(config)
-            await self._driver.config_manager.save()
+            await test_device.disconnect()
 
             _LOG.info(
-                "Setup completed: %d device(s) configured",
-                len(available_devices),
+                "Setup validated: %d device(s) available",
+                len(config.devices),
             )
 
-            return SetupComplete()
+            return config
 
-        except Exception as e:
-            _LOG.error("Setup error: %s", e, exc_info=True)
-            await self._cleanup_setup_device()
-            return SetupError(IntegrationSetupError.OTHER)
-
-    async def _handle_user_data(self, msg: UserDataResponse) -> SetupAction:
-        """Handle user data response."""
-        _LOG.info("Received user data: %s", msg.input_values.keys())
-        return SetupComplete()
-
-    async def _handle_abort(self, msg: AbortDriverSetup) -> SetupAction:
-        """Handle setup abort."""
-        _LOG.warning("Setup aborted: %s", msg.error)
-        await self._cleanup_setup_device()
-        return SetupError(msg.error)
-
-    async def _cleanup_setup_device(self) -> None:
-        """Clean up setup device connection."""
-        if self._setup_device:
-            await self._setup_device.disconnect()
-            self._setup_device = None
+        except Exception as err:
+            try:
+                await test_device.disconnect()
+            except Exception:
+                pass
+            raise ValueError(f"Setup failed: {err}") from err

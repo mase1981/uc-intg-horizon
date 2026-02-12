@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class HorizonDeviceConfig:
-    """Configuration for a single Horizon device."""
+    """Configuration for a single Horizon set-top box."""
 
     device_id: str
     name: str
@@ -20,7 +20,7 @@ class HorizonDeviceConfig:
 
 @dataclass
 class HorizonConfig:
-    """Configuration for a Horizon account."""
+    """Configuration for a Horizon account (supports multiple STBs)."""
 
     identifier: str
     name: str

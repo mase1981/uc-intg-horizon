@@ -255,10 +255,18 @@ class HorizonMediaPlayer(MediaPlayer):
                     if source.startswith("HDMI") or source == "AV Input":
                         await self._horizon_device.send_key(self._device_id, "Settings")
                     elif source in [
-                        "Netflix", "BBC iPlayer", "ITVX", "All 4", "My5",
-                        "Prime Video", "YouTube", "Disney+",
+                        "Netflix",
+                        "BBC iPlayer",
+                        "ITVX",
+                        "All 4",
+                        "My5",
+                        "Prime Video",
+                        "YouTube",
+                        "Disney+",
                     ]:
-                        await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
+                        await self._horizon_device.send_key(
+                            self._device_id, "MediaTopMenu"
+                        )
                     else:
                         await self._horizon_device.set_channel(self._device_id, source)
                         is_channel_command = True
