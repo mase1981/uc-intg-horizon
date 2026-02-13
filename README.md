@@ -190,9 +190,12 @@ The tool automatically cleans and validates your token, removing quotes, whitesp
 - Discovers all boxes on your account
 - Setup fails if credentials invalid
 
-4. Integration will create entities:
-   - **Media Player** - `{device_id}` for each box
-   - **Remote** - `{device_id}_remote` for each box
+4. Integration will create entities for each discovered box:
+   - **Media Player** - `{device_id}` - Full media control
+   - **Remote** - `{device_id}_remote` - Button mapping and UI pages
+   - **State Sensor** - `{device_id}_state` - Device connection state (ONLINE_RUNNING/ONLINE_STANDBY/OFFLINE)
+   - **Channel Sensor** - `{device_id}_channel` - Current channel name
+   - **Program Sensor** - `{device_id}_program` - Current program title
 
 ## Using the Integration
 
@@ -235,6 +238,26 @@ Switch between HDMI inputs and streaming apps:
 2. Click **Sources**
 3. Select from HDMI inputs or streaming apps
 4. Settings menu will open for navigation
+
+### Seek Support
+
+For recordings and catch-up TV, use seek to jump to specific positions:
+
+1. During playback of recorded content or catch-up TV
+2. Use the seek control in the **Media Player** entity
+3. Jump forward or backward to any position in the program
+
+### Sensor Entities
+
+Three sensor entities are created for each set-top box:
+
+| Sensor | Entity ID | Description |
+|--------|-----------|-------------|
+| **Device State** | `{device_id}_state` | Connection state: `ONLINE_RUNNING`, `ONLINE_STANDBY`, or `OFFLINE` |
+| **Channel** | `{device_id}_channel` | Name of the current channel being watched |
+| **Program** | `{device_id}_program` | Title of the current program |
+
+These sensors update in real-time via MQTT and can be used for automations or status displays.
 
 ## Credits
 
