@@ -7,15 +7,17 @@ Setup flow for Horizon integration using ucapi-framework.
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import ssl
 from typing import Any
 
+import aiohttp
+import certifi
+from lghorizon import COUNTRY_SETTINGS, LGHorizonAuth
 from ucapi import DriverSetupRequest, RequestUserInput, SetupAction
 from ucapi_framework import BaseSetupFlow
 
 from uc_intg_horizon.config import HorizonConfig
-from uc_intg_horizon.device import HorizonDevice
 
 _LOG = logging.getLogger(__name__)
 
@@ -125,9 +127,15 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
         self, input_values: dict[str, Any]
     ) -> HorizonConfig | RequestUserInput:
         """
-        Validate connection and discover devices.
+        Validate connection and discover devices using LIGHTWEIGHT auth-only flow.
 
-        Called after user provides credentials via driver.json schema or manual entry.
+        This bypasses the full initialize() which fetches channels and connects MQTT.
+        For setup, we only need to:
+        1. Authenticate
+        2. Get customer info with device list
+        3. Return config with devices
+
+        Full initialization happens later when integration actually runs.
         """
         provider = input_values.get("provider")
         username = input_values.get("username")
@@ -148,69 +156,83 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
             password=password,
         )
 
-        _LOG.info("Testing connection to Horizon API (provider=%s)...", provider)
+        _LOG.info("Validating credentials for %s (lightweight check)...", provider)
 
-        test_device = HorizonDevice(config)
-
+        session = None
         try:
-            if not await test_device.connect():
-                raise ValueError(
-                    f"Failed to connect to Horizon API\n"
-                    f"Please verify your credentials for {provider}"
+            country_code = self._get_country_code(provider)
+            use_refresh_token = COUNTRY_SETTINGS.get(country_code, {}).get(
+                "use_refreshtoken", False
+            )
+
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            session = aiohttp.ClientSession(connector=connector)
+
+            if use_refresh_token:
+                _LOG.info("Using refresh token authentication for %s", country_code.upper())
+                auth = LGHorizonAuth(
+                    websession=session,
+                    country_code=country_code,
+                    username=username,
+                    password="",
+                    refresh_token=password,
+                )
+            else:
+                auth = LGHorizonAuth(
+                    websession=session,
+                    country_code=country_code,
+                    username=username,
+                    password=password,
                 )
 
-            _LOG.info("Connection successful")
+            _LOG.info("Fetching service configuration...")
+            service_config = await auth.get_service_config()
 
-            api_devices = test_device.devices
-            if not api_devices:
-                await test_device.disconnect()
+            _LOG.info("Fetching customer info with devices...")
+            service_url = await service_config.get_service_url("personalizationService")
+            customer_data = await auth.request(
+                service_url,
+                f"/v1/customer/{auth.household_id}?with=profiles%2Cdevices",
+            )
+
+            device_ids = customer_data.get("assignedDevices", [])
+            if not device_ids:
                 raise ValueError(
                     "No devices found in your account\n"
                     "Please verify your account has active set-top boxes"
                 )
 
-            _LOG.info("Found %d devices from API", len(api_devices))
+            _LOG.info("Found %d device(s) in account", len(device_ids))
 
-            available_count = 0
-            unavailable_count = 0
+            for device_id in device_ids:
+                config.add_device(device_id, f"Horizon Box ({device_id[-6:]})")
+                _LOG.info("  Device: %s", device_id)
 
-            for device_id, device in api_devices.items():
-                device_name = device.device_friendly_name
-                state = device.device_state
-                running_state = state.state if state else None
+            if hasattr(auth, "refresh_token") and auth.refresh_token:
+                if auth.refresh_token != password:
+                    _LOG.info("Token was refreshed - updating config")
+                    config.password = auth.refresh_token
 
-                config.add_device(device_id, device_name)
-                if running_state is not None:
-                    _LOG.info(
-                        "  Device: %s (%s) - State: %s",
-                        device_name,
-                        device_id,
-                        running_state,
-                    )
-                else:
-                    _LOG.info(
-                        "  Device: %s (%s) - State pending (MQTT connecting)",
-                        device_name,
-                        device_id,
-                    )
-
-            refreshed_token = test_device.get_refreshed_token()
-            if refreshed_token and refreshed_token != password:
-                _LOG.info("Token was refreshed during connection - updating config")
-                config.password = refreshed_token
-
-            await test_device.disconnect()
-
-            _LOG.info(
-                "Setup validated: %d device(s) available",
-                len(config.devices),
-            )
-
+            _LOG.info("Setup validated: %d device(s) found", len(config.devices))
             return config
 
         except Exception as err:
-            try:
-                await test_device.disconnect()
-            except Exception:
-                pass
+            _LOG.error("Setup validation failed: %s", err)
             raise ValueError(f"Setup failed: {err}") from err
+
+        finally:
+            if session and not session.closed:
+                await session.close()
+
+    def _get_country_code(self, provider: str) -> str:
+        """Map provider name to country code."""
+        provider_map = {
+            "Ziggo": "nl",
+            "VirginMedia": "gb",
+            "Telenet": "be",
+            "UPC": "ch",
+            "Sunrise": "ch",
+            "Magenta": "at",
+        }
+        return provider_map.get(provider, "nl")
