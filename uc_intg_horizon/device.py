@@ -130,9 +130,7 @@ class HorizonDevice(ExternalClientDevice):
                 password=self._device_config.password,
             )
 
-        await self._auth.fetch_access_token()
-
-        self._api = LGHorizonApi(auth=self._auth, profile_id=None)
+        self._api = LGHorizonApi(auth=self._auth, profile_id="")
         return self._api
 
     async def connect_client(self) -> None:
