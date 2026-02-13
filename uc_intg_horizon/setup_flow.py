@@ -196,18 +196,20 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
                 f"/v1/customer/{auth.household_id}?with=profiles%2Cdevices",
             )
 
-            device_ids = customer_data.get("assignedDevices", [])
-            if not device_ids:
+            assigned_devices = customer_data.get("assignedDevices", [])
+            if not assigned_devices:
                 raise ValueError(
                     "No devices found in your account\n"
                     "Please verify your account has active set-top boxes"
                 )
 
-            _LOG.info("Found %d device(s) in account", len(device_ids))
+            _LOG.info("Found %d device(s) in account", len(assigned_devices))
 
-            for device_id in device_ids:
-                config.add_device(device_id, f"Horizon Box ({device_id[-6:]})")
-                _LOG.info("  Device: %s", device_id)
+            for device in assigned_devices:
+                device_id = device.get("deviceId", "")
+                device_name = device.get("deviceFriendlyName", f"Horizon Box ({device_id[-6:]})")
+                config.add_device(device_id, device_name)
+                _LOG.info("  Device: %s (%s)", device_name, device_id)
 
             if hasattr(auth, "refresh_token") and auth.refresh_token:
                 if auth.refresh_token != password:
