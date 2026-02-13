@@ -106,7 +106,6 @@ class HorizonDevice(ExternalClientDevice):
             raise ValueError(f"Unsupported country code: {self._country_code}")
 
         country_config = COUNTRY_SETTINGS[self._country_code]
-        api_url = country_config["api_url"]
         use_refresh_token = country_config.get("use_refreshtoken", False)
 
         self._session = aiohttp.ClientSession()
@@ -117,8 +116,7 @@ class HorizonDevice(ExternalClientDevice):
                 self._country_code.upper(),
             )
             self._auth = LGHorizonAuth(
-                session=self._session,
-                api_url=api_url,
+                websession=self._session,
                 country_code=self._country_code,
                 username=self._device_config.username,
                 password="",
@@ -126,14 +124,13 @@ class HorizonDevice(ExternalClientDevice):
             )
         else:
             self._auth = LGHorizonAuth(
-                session=self._session,
-                api_url=api_url,
+                websession=self._session,
                 country_code=self._country_code,
                 username=self._device_config.username,
                 password=self._device_config.password,
             )
 
-        await self._auth.login()
+        await self._auth.fetch_access_token()
 
         self._api = LGHorizonApi(auth=self._auth, profile_id=None)
         return self._api
