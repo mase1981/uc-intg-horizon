@@ -142,6 +142,7 @@ class HorizonDevice(ExternalClientDevice):
             raise RuntimeError("API not initialized")
 
         await self._api.initialize()
+        await self._wait_for_mqtt_ready()
         self._lg_devices = await self._api.get_devices()
 
         for device_id, device in self._lg_devices.items():
@@ -151,6 +152,42 @@ class HorizonDevice(ExternalClientDevice):
             "Connected to Horizon API successfully. Devices found: %d",
             len(self._lg_devices),
         )
+
+    async def _wait_for_mqtt_ready(self, timeout: int = 25) -> None:
+        """Wait for devices to register on MQTT and report their state."""
+        elapsed = 0
+        check_interval = 0.5
+
+        _LOG.debug("Waiting for devices to register on MQTT...")
+
+        while elapsed < timeout:
+            devices = await self._api.get_devices()
+            if devices:
+                ready_count = 0
+                for device_id, box in devices.items():
+                    if hasattr(box, "device_state") and box.device_state is not None:
+                        ready_count += 1
+                        _LOG.debug(
+                            "Device %s ready with state: %s",
+                            device_id,
+                            box.device_state.state if box.device_state else "None",
+                        )
+
+                if ready_count > 0:
+                    _LOG.info(
+                        "MQTT ready: %d/%d devices reported state",
+                        ready_count,
+                        len(devices),
+                    )
+                    return
+
+            await asyncio.sleep(check_interval)
+            elapsed += check_interval
+
+            if int(elapsed) % 5 == 0 and elapsed > 0:
+                _LOG.debug("Still waiting for MQTT ready... (%.1fs elapsed)", elapsed)
+
+        _LOG.warning("MQTT ready timeout after %ds - proceeding anyway", timeout)
 
     async def disconnect_client(self) -> None:
         """Disconnect the lghorizon client."""
