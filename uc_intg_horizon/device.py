@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import ssl
 from typing import Any
 
 import aiohttp
@@ -108,7 +109,9 @@ class HorizonDevice(ExternalClientDevice):
         country_config = COUNTRY_SETTINGS[self._country_code]
         use_refresh_token = country_config.get("use_refreshtoken", False)
 
-        self._session = aiohttp.ClientSession()
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        self._session = aiohttp.ClientSession(connector=connector)
 
         if use_refresh_token:
             _LOG.info(
