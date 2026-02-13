@@ -159,8 +159,7 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
                     f"Please verify your credentials for {provider}"
                 )
 
-            _LOG.info("Connection successful - waiting for device states...")
-            await asyncio.sleep(5)
+            _LOG.info("Connection successful")
 
             api_devices = test_device.devices
             if not api_devices:
@@ -180,35 +179,20 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
                 state = device.device_state
                 running_state = state.state if state else None
 
+                config.add_device(device_id, device_name)
                 if running_state is not None:
-                    config.add_device(device_id, device_name)
-                    available_count += 1
                     _LOG.info(
-                        "  AVAILABLE: %s (%s) - State: %s",
+                        "  Device: %s (%s) - State: %s",
                         device_name,
                         device_id,
                         running_state,
                     )
                 else:
-                    unavailable_count += 1
-                    _LOG.warning(
-                        "  UNAVAILABLE: %s (%s) - No MQTT state (device may be offline)",
+                    _LOG.info(
+                        "  Device: %s (%s) - State pending (MQTT connecting)",
                         device_name,
                         device_id,
                     )
-
-            if unavailable_count > 0:
-                _LOG.warning(
-                    "%d device(s) unavailable (not reporting to MQTT)",
-                    unavailable_count,
-                )
-
-            if not config.devices:
-                await test_device.disconnect()
-                raise ValueError(
-                    "No available devices found\n"
-                    "All devices appear to be offline or not connected to MQTT"
-                )
 
             refreshed_token = test_device.get_refreshed_token()
             if refreshed_token and refreshed_token != password:

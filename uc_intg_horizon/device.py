@@ -142,7 +142,6 @@ class HorizonDevice(ExternalClientDevice):
             raise RuntimeError("API not initialized")
 
         await self._api.initialize()
-        await self._wait_for_mqtt_ready()
         self._lg_devices = await self._api.get_devices()
 
         for device_id, device in self._lg_devices.items():
@@ -153,7 +152,7 @@ class HorizonDevice(ExternalClientDevice):
             len(self._lg_devices),
         )
 
-    async def _wait_for_mqtt_ready(self, timeout: int = 25) -> None:
+    async def _wait_for_mqtt_ready(self, timeout: int = 10) -> None:
         """Wait for devices to register on MQTT and report their state."""
         elapsed = 0
         check_interval = 0.5
