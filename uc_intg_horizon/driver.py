@@ -48,11 +48,21 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
 
         self.api.add_listener(Events.SUBSCRIBE_ENTITIES, self._on_subscribe_entities)
 
-    def on_device_added(self, device: HorizonDevice) -> None:
+    def on_device_added(self, device_or_config: HorizonDevice | HorizonConfig) -> None:
         """Handle device added - create entities for all STBs in the account."""
-        _LOG.info("Device added: %s", device.identifier)
+        if isinstance(device_or_config, HorizonConfig):
+            config = device_or_config
+            _LOG.info("Device added (from config): %s", config.identifier)
+            if config.identifier not in self._device_instances:
+                device = HorizonDevice(device_config=config)
+                self._device_instances[config.identifier] = device
+            else:
+                device = self._device_instances[config.identifier]
+        else:
+            device = device_or_config
+            config = device.config
+            _LOG.info("Device added: %s", device.identifier)
 
-        config = device.config
         device.events.on(DeviceEvents.UPDATE, self._on_device_state_change)
 
         for device_cfg in config.devices:
@@ -83,9 +93,9 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             for sensor in sensors:
                 self.api.available_entities.add(sensor)
 
-    def on_device_removed(self, device: HorizonDevice | None) -> None:
+    def on_device_removed(self, device_or_config: HorizonDevice | HorizonConfig | None) -> None:
         """Handle device removed - clean up entities."""
-        if device is None:
+        if device_or_config is None:
             _LOG.info("All devices removed")
             self._media_players.clear()
             self._remotes.clear()
@@ -93,9 +103,14 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             self.api.available_entities.clear()
             return
 
-        _LOG.info("Device removed: %s", device.identifier)
+        if isinstance(device_or_config, HorizonConfig):
+            config = device_or_config
+            _LOG.info("Device removed: %s", config.identifier)
+        else:
+            config = device_or_config.config
+            _LOG.info("Device removed: %s", device_or_config.identifier)
 
-        for device_cfg in device.config.devices:
+        for device_cfg in config.devices:
             device_id = device_cfg.device_id
 
             if device_id in self._media_players:

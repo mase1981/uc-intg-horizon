@@ -232,9 +232,8 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
         provider_map = {
             "Ziggo": "nl",
             "VirginMedia": "gb",
-            "Telenet": "be",
+            "Telenet": "be-nl",
             "UPC": "ch",
             "Sunrise": "ch",
-            "Magenta": "at",
         }
         return provider_map.get(provider, "nl")
