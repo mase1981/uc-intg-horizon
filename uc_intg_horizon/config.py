@@ -29,6 +29,16 @@ class HorizonConfig:
     password: str
     devices: list[HorizonDeviceConfig] = field(default_factory=list)
 
+    def __post_init__(self):
+        """Convert devices from dicts to HorizonDeviceConfig if needed."""
+        converted = []
+        for device in self.devices:
+            if isinstance(device, dict):
+                converted.append(HorizonDeviceConfig(**device))
+            else:
+                converted.append(device)
+        self.devices = converted
+
     def add_device(self, device_id: str, name: str) -> None:
         """Add a device to the configuration."""
         for existing in self.devices:
