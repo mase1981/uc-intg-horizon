@@ -61,6 +61,7 @@ class HorizonDevice(ExternalClientDevice):
         self._auth: LGHorizonAuth | None = None
         self._api: LGHorizonApi | None = None
         self._lg_devices: dict[str, LGDevice] = {}
+        self._token_needs_save: bool = False
 
         os.environ["SSL_CERT_FILE"] = certifi.where()
         os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -123,12 +124,38 @@ class HorizonDevice(ExternalClientDevice):
             username=self._device_config.username,
             password="",
             refresh_token=self._device_config.password,
+            token_refresh_callback=self._on_token_refreshed,
         )
         # Override lghorizon's country-based setting - we have a refresh token from setup
         self._auth._use_refresh_token = True
 
         self._api = LGHorizonApi(auth=self._auth, profile_id="")
         return self._api
+
+    def _on_token_refreshed(self, new_token: str) -> None:
+        """Handle token refresh callback from lghorizon.
+
+        This is called whenever the API refreshes the token. We must save
+        the new token because the old one is now invalidated.
+        """
+        old_token = self._device_config.password
+        if new_token and new_token != old_token:
+            _LOG.info(
+                "Token refreshed by API - updating config (old: %s... new: %s...)",
+                old_token[:20] if old_token and len(old_token) > 20 else old_token,
+                new_token[:20] if len(new_token) > 20 else new_token,
+            )
+            self._device_config.password = new_token
+            self._token_needs_save = True
+
+    @property
+    def token_needs_save(self) -> bool:
+        """Check if the token was refreshed and needs saving."""
+        return self._token_needs_save
+
+    def mark_token_saved(self) -> None:
+        """Mark that the token has been saved."""
+        self._token_needs_save = False
 
     async def connect_client(self) -> None:
         """Connect the lghorizon client and set up callbacks.

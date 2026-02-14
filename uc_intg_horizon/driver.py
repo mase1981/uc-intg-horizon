@@ -207,6 +207,13 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         """Handle device state change from MQTT callback."""
         _LOG.debug("Device state changed: %s", device_id)
 
+        config_id = self._stb_to_config.get(device_id)
+        if config_id:
+            device = self._device_instances.get(config_id)
+            config = self.config_manager.get(config_id) if self.config_manager else None
+            if device and config and device.token_needs_save:
+                self._save_token_if_changed(device, config)
+
         if device_id in self._media_players:
             mp = self._media_players[device_id]
             if self.api.configured_entities.contains(mp.id):
@@ -241,11 +248,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
                     _LOG.error("Failed to connect device: %s", config.identifier)
                     success = False
                 else:
-                    refreshed_token = device.get_refreshed_token()
-                    if refreshed_token and refreshed_token != config.password:
-                        config.password = refreshed_token
-                        self.config_manager.update(config)
-                        _LOG.info("Token refreshed and saved for %s", config.identifier)
+                    self._save_token_if_changed(device, config)
 
         if success and self._media_players:
             await self.api.set_device_state(DeviceStates.CONNECTED)
@@ -254,6 +257,19 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             self._start_retry_task()
 
         return success
+
+    def _save_token_if_changed(self, device: HorizonDevice, config: HorizonConfig) -> None:
+        """Save the token if it was refreshed by the API."""
+        refreshed_token = device.get_refreshed_token()
+        if refreshed_token and refreshed_token != config.password:
+            config.password = refreshed_token
+            self.config_manager.update(config)
+            device.mark_token_saved()
+            _LOG.info("Token refreshed and saved for %s", config.identifier)
+        elif device.token_needs_save:
+            self.config_manager.update(config)
+            device.mark_token_saved()
+            _LOG.info("Token saved for %s (flagged by callback)", config.identifier)
 
     def _start_retry_task(self) -> None:
         """Start background retry task."""
