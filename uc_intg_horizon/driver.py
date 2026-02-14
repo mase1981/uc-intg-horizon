@@ -91,28 +91,26 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         """
         return None
 
-    def on_device_added(self, device_or_config: HorizonDevice | HorizonConfig) -> None:
-        """Handle device added - create entities for all STBs in the account."""
-        if isinstance(device_or_config, HorizonConfig):
-            config = device_or_config
-            _LOG.info("Device added (from config): %s", config.identifier)
-            if config.identifier not in self._device_instances:
-                device = HorizonDevice(device_config=config)
-                self._device_instances[config.identifier] = device
-            else:
-                device = self._device_instances[config.identifier]
-        else:
-            device = device_or_config
-            config = device.config
-            _LOG.info("Device added: %s", device.identifier)
+    def register_available_entities(
+        self, device_config: HorizonConfig, device: HorizonDevice
+    ) -> None:
+        """Register available entities for all STBs in the account.
+
+        Override framework method to handle Horizon's 1-account = N-STBs pattern.
+        """
+        _LOG.info(
+            "Registering entities for %s (%d STBs)",
+            device_config.identifier,
+            len(device_config.devices),
+        )
 
         device.events.on(DeviceEvents.UPDATE, self._on_device_state_change)
 
-        for device_cfg in config.devices:
+        for device_cfg in device_config.devices:
             device_id = device_cfg.device_id
             device_name = device_cfg.name
 
-            self._stb_to_config[device_id] = config.identifier
+            self._stb_to_config[device_id] = device_config.identifier
             _LOG.info("Creating entities for STB: %s (%s)", device_name, device_id)
 
             sensors = [
