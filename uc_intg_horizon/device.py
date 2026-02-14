@@ -107,32 +107,25 @@ class HorizonDevice(ExternalClientDevice):
         if self._country_code not in COUNTRY_SETTINGS:
             raise ValueError(f"Unsupported country code: {self._country_code}")
 
-        country_config = COUNTRY_SETTINGS[self._country_code]
-        use_refresh_token = country_config.get("use_refreshtoken", False)
-
         ssl_context = ssl.create_default_context(cafile=certifi.where())
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         self._session = aiohttp.ClientSession(connector=connector)
 
-        if use_refresh_token:
-            _LOG.info(
-                "Using refresh token authentication for %s",
-                self._country_code.upper(),
-            )
-            self._auth = LGHorizonAuth(
-                websession=self._session,
-                country_code=self._country_code,
-                username=self._device_config.username,
-                password="",
-                refresh_token=self._device_config.password,
-            )
-        else:
-            self._auth = LGHorizonAuth(
-                websession=self._session,
-                country_code=self._country_code,
-                username=self._device_config.username,
-                password=self._device_config.password,
-            )
+        # After initial setup, config.password contains refresh token (not original password)
+        # Always use refresh token auth since setup already authenticated and saved the token
+        _LOG.info(
+            "Using refresh token authentication for %s",
+            self._country_code.upper(),
+        )
+        self._auth = LGHorizonAuth(
+            websession=self._session,
+            country_code=self._country_code,
+            username=self._device_config.username,
+            password="",
+            refresh_token=self._device_config.password,
+        )
+        # Override lghorizon's country-based setting - we have a refresh token from setup
+        self._auth._use_refresh_token = True
 
         self._api = LGHorizonApi(auth=self._auth, profile_id="")
         return self._api
