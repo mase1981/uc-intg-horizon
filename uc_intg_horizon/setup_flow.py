@@ -213,9 +213,18 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
                 _LOG.info("  Device: %s (%s)", device_name, device_id)
 
             if hasattr(auth, "refresh_token") and auth.refresh_token:
-                if auth.refresh_token != password:
-                    _LOG.info("Token was refreshed - updating config")
-                    config.password = auth.refresh_token
+                new_token = auth.refresh_token
+                if new_token != password:
+                    _LOG.info(
+                        "Token was refreshed - saving (token: %s...)",
+                        new_token[:20] if len(new_token) > 20 else new_token,
+                    )
+                    config.password = new_token
+                else:
+                    _LOG.info(
+                        "Using provided token (token: %s...)",
+                        password[:20] if password and len(password) > 20 else password,
+                    )
 
             _LOG.info("Setup validated: %d device(s) found", len(config.devices))
             return config

@@ -111,11 +111,11 @@ class HorizonDevice(ExternalClientDevice):
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         self._session = aiohttp.ClientSession(connector=connector)
 
-        # After initial setup, config.password contains refresh token (not original password)
-        # Always use refresh token auth since setup already authenticated and saved the token
+        token = self._device_config.password
         _LOG.info(
-            "Using refresh token authentication for %s",
+            "Using refresh token auth for %s (token: %s...)",
             self._country_code.upper(),
+            token[:20] if token and len(token) > 20 else token,
         )
         self._auth = LGHorizonAuth(
             websession=self._session,
@@ -148,18 +148,23 @@ class HorizonDevice(ExternalClientDevice):
         self._api._refresh_channels = _deferred_channels
         _LOG.info("Starting lightweight initialization (channels deferred)...")
 
-        await self._api.initialize()
-        self._lg_devices = await self._api.get_devices()
+        try:
+            await self._api.initialize()
+            self._lg_devices = await self._api.get_devices()
 
-        for device_id, device in self._lg_devices.items():
-            await device.set_callback(self._on_device_state_change)
+            for device_id, device in self._lg_devices.items():
+                await device.set_callback(self._on_device_state_change)
 
-        _LOG.info(
-            "Connected to Horizon API. Devices found: %d. Loading channels in background...",
-            len(self._lg_devices),
-        )
+            _LOG.info(
+                "Connected to Horizon API. Devices found: %d. Loading channels in background...",
+                len(self._lg_devices),
+            )
 
-        asyncio.create_task(self._load_channels_background(original_refresh_channels))
+            asyncio.create_task(self._load_channels_background(original_refresh_channels))
+        except Exception as e:
+            _LOG.error("Connection failed, cleaning up: %s", e)
+            await self.disconnect_client()
+            raise
 
     async def _load_channels_background(self, refresh_channels_func) -> None:
         """Load channels in background after initial connection."""
@@ -223,8 +228,13 @@ class HorizonDevice(ExternalClientDevice):
         self._auth = None
 
     def check_client_connected(self) -> bool:
-        """Check if the lghorizon client is connected."""
-        return self._api is not None and self._session is not None and not self._session.closed
+        """Check if the lghorizon client is connected and initialized."""
+        return (
+            self._api is not None
+            and self._session is not None
+            and not self._session.closed
+            and bool(self._lg_devices)
+        )
 
     async def _on_device_state_change(self, device_id: str) -> None:
         """Handle device state change callback from lghorizon MQTT."""
