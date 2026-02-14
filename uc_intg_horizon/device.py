@@ -46,7 +46,7 @@ class HorizonDevice(ExternalClientDevice):
     The watchdog monitors connection health and triggers reconnection if needed.
     """
 
-    def __init__(self, device_config: HorizonConfig) -> None:
+    def __init__(self, device_config: HorizonConfig, **kwargs) -> None:
         """Initialize the Horizon device wrapper."""
         super().__init__(
             device_config=device_config,
@@ -54,6 +54,7 @@ class HorizonDevice(ExternalClientDevice):
             watchdog_interval=60,
             reconnect_delay=10,
             max_reconnect_attempts=0,
+            **kwargs,
         )
 
         self._session: aiohttp.ClientSession | None = None
