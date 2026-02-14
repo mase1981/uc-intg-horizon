@@ -47,24 +47,27 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         self._remotes: dict[str, HorizonRemote] = {}
         self._sensors: dict[str, list] = {}
         self._retry_task: asyncio.Task | None = None
+        self._stb_to_config: dict[str, str] = {}
 
         self.api.add_listener(Events.SUBSCRIBE_ENTITIES, self._on_subscribe_entities)
 
     def device_from_entity_id(self, entity_id: str) -> str | None:
         """
-        Extract device identifier from entity identifier.
+        Extract config identifier from entity identifier.
 
-        Entity ID format:
-        - media_player: device_id
-        - remote: device_id_remote
-        - sensors: device_id_state, device_id_channel, device_id_program
+        Entity IDs use STB IDs, but configs use account identifiers.
+        This method maps STB ID back to the config identifier.
         """
         if not entity_id:
             return None
+
+        stb_id = entity_id
         for suffix in self._ENTITY_SUFFIXES:
             if entity_id.endswith(suffix):
-                return entity_id[: -len(suffix)]
-        return entity_id
+                stb_id = entity_id[: -len(suffix)]
+                break
+
+        return self._stb_to_config.get(stb_id)
 
     def entity_type_from_entity_id(self, entity_id: str) -> str | None:
         """
@@ -109,6 +112,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             device_id = device_cfg.device_id
             device_name = device_cfg.name
 
+            self._stb_to_config[device_id] = config.identifier
             _LOG.info("Creating entities for STB: %s (%s)", device_name, device_id)
 
             sensors = [
@@ -140,6 +144,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             self._media_players.clear()
             self._remotes.clear()
             self._sensors.clear()
+            self._stb_to_config.clear()
             self.api.available_entities.clear()
             return
 
@@ -152,6 +157,8 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
 
         for device_cfg in config.devices:
             device_id = device_cfg.device_id
+
+            self._stb_to_config.pop(device_id, None)
 
             if device_id in self._media_players:
                 mp = self._media_players.pop(device_id)
