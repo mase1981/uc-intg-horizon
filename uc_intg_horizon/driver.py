@@ -35,6 +35,8 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
     Handles multi-device pattern: 1 account config = N set-top boxes.
     """
 
+    _ENTITY_SUFFIXES = ("_remote", "_state", "_channel", "_program")
+
     def __init__(self):
         super().__init__(
             device_class=HorizonDevice,
@@ -47,6 +49,44 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         self._retry_task: asyncio.Task | None = None
 
         self.api.add_listener(Events.SUBSCRIBE_ENTITIES, self._on_subscribe_entities)
+
+    def device_from_entity_id(self, entity_id: str) -> str | None:
+        """
+        Extract device identifier from entity identifier.
+
+        Entity ID format:
+        - media_player: device_id
+        - remote: device_id_remote
+        - sensors: device_id_state, device_id_channel, device_id_program
+        """
+        if not entity_id:
+            return None
+        for suffix in self._ENTITY_SUFFIXES:
+            if entity_id.endswith(suffix):
+                return entity_id[: -len(suffix)]
+        return entity_id
+
+    def entity_type_from_entity_id(self, entity_id: str) -> str | None:
+        """
+        Extract entity type from entity identifier.
+
+        Returns "remote", "sensor", or "media_player" based on entity ID suffix.
+        """
+        if not entity_id:
+            return None
+        if entity_id.endswith("_remote"):
+            return "remote"
+        if entity_id.endswith(("_state", "_channel", "_program")):
+            return "sensor"
+        return "media_player"
+
+    def sub_device_from_entity_id(self, entity_id: str) -> str | None:
+        """
+        Extract sub-device identifier from entity identifier.
+
+        Horizon doesn't use sub-devices, always returns None.
+        """
+        return None
 
     def on_device_added(self, device_or_config: HorizonDevice | HorizonConfig) -> None:
         """Handle device added - create entities for all STBs in the account."""

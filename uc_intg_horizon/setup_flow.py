@@ -207,7 +207,8 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
 
             for device in assigned_devices:
                 device_id = device.get("deviceId", "")
-                device_name = device.get("deviceFriendlyName", f"Horizon Box ({device_id[-6:]})")
+                settings = device.get("settings", {})
+                device_name = settings.get("deviceFriendlyName", f"Horizon Box ({device_id[-6:]})")
                 config.add_device(device_id, device_name)
                 _LOG.info("  Device: %s (%s)", device_name, device_id)
 
