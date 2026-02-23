@@ -41,6 +41,7 @@ class HorizonMediaPlayer(MediaPlayer):
         self._sensors = sensors or []
         self._refresh_task: asyncio.Task | None = None
         self._channel_update_task: asyncio.Task | None = None
+        self._last_good_metadata: dict[str, Any] = {}
 
         features = [
             Features.ON_OFF,
@@ -369,6 +370,48 @@ class HorizonMediaPlayer(MediaPlayer):
         timestamp = int(time.time() * 1000)
         return f"{base_url}{separator}_t={timestamp}"
 
+    def _is_degraded_metadata(self, device_state: dict[str, Any]) -> bool:
+        """Check if metadata looks like degraded/placeholder values (e.g., BBC Launcher)."""
+        channel = (device_state.get("channel") or "").strip()
+        title = (device_state.get("media_title") or "").strip()
+        image = (device_state.get("media_image") or "").lower()
+
+        if not channel or channel == "No Channel":
+            return True
+        if not title or title == "No Program" or "launcher" in title.lower():
+            return True
+        if "appstore" in image:
+            return True
+        if not device_state.get("start_time") and not device_state.get("end_time"):
+            return True
+
+        return False
+
+    def _cache_good_metadata(self, device_state: dict[str, Any]) -> None:
+        """Cache valid metadata for fallback when degraded updates arrive."""
+        self._last_good_metadata = {
+            "channel": device_state.get("channel"),
+            "media_title": device_state.get("media_title"),
+            "media_image": device_state.get("media_image"),
+            "start_time": device_state.get("start_time"),
+            "end_time": device_state.get("end_time"),
+            "position": device_state.get("position"),
+            "duration": device_state.get("duration"),
+        }
+        _LOG.debug("Cached good metadata: channel=%s, title=%s",
+                   self._last_good_metadata.get("channel"),
+                   self._last_good_metadata.get("media_title"))
+
+    def _get_effective_metadata(self, device_state: dict[str, Any]) -> dict[str, Any]:
+        """Return device_state or cached metadata if current state is degraded."""
+        if self._is_degraded_metadata(device_state) and self._last_good_metadata:
+            _LOG.debug("Using cached metadata (current appears degraded: title=%s, image=%s)",
+                       device_state.get("media_title"), device_state.get("media_image"))
+            return {**device_state, **self._last_good_metadata}
+
+        self._cache_good_metadata(device_state)
+        return device_state
+
     async def push_update(self) -> None:
         """Push state update to UC Remote."""
         if not self._api or not self._api.configured_entities.contains(self.id):
@@ -382,15 +425,21 @@ class HorizonMediaPlayer(MediaPlayer):
                 self.attributes[Attributes.STATE] = States.PAUSED
             else:
                 self.attributes[Attributes.STATE] = States.PLAYING
+            effective_state = self._get_effective_metadata(device_state)
         elif horizon_state == "ONLINE_STANDBY":
             self.attributes[Attributes.STATE] = States.STANDBY
+            self._last_good_metadata = {}
+            effective_state = device_state
         elif horizon_state == "OFFLINE":
             self.attributes[Attributes.STATE] = States.OFF
+            self._last_good_metadata = {}
+            effective_state = device_state
         else:
             self.attributes[Attributes.STATE] = States.UNAVAILABLE
+            effective_state = device_state
 
-        channel_name = device_state.get("channel", "")
-        program_title = device_state.get("media_title", "")
+        channel_name = effective_state.get("channel", "")
+        program_title = effective_state.get("media_title", "")
 
         if program_title:
             self.attributes[Attributes.MEDIA_TITLE] = program_title
@@ -402,14 +451,14 @@ class HorizonMediaPlayer(MediaPlayer):
             self.attributes[Attributes.MEDIA_TITLE] = ""
             self.attributes[Attributes.MEDIA_ARTIST] = ""
 
-        if device_state.get("media_image"):
-            original_url = device_state["media_image"]
+        if effective_state.get("media_image"):
+            original_url = effective_state["media_image"]
             unique_url = self._make_unique_image_url(original_url)
             self.attributes[Attributes.MEDIA_IMAGE_URL] = unique_url
 
-        start_time = device_state.get("start_time")
-        end_time = device_state.get("end_time")
-        position = device_state.get("position")
+        start_time = effective_state.get("start_time")
+        end_time = effective_state.get("end_time")
+        position = effective_state.get("position")
 
         if start_time and end_time:
             pos, dur = self._calculate_position_duration(start_time, end_time, position)
