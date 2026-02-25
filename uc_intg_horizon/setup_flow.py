@@ -14,7 +14,7 @@ from typing import Any
 import aiohttp
 import certifi
 from lghorizon import COUNTRY_SETTINGS, LGHorizonAuth
-from ucapi import DriverSetupRequest, RequestUserInput, SetupAction
+from ucapi import RequestUserInput, SetupAction
 from ucapi_framework import BaseSetupFlow
 
 from uc_intg_horizon.config import HorizonConfig
@@ -23,55 +23,35 @@ _LOG = logging.getLogger(__name__)
 
 
 class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
-    """Setup flow for Horizon integration using driver.json schema."""
-
-    def __init__(self, *args, **kwargs):
-        """Initialize with storage for initial setup_data."""
-        super().__init__(*args, **kwargs)
-        self._initial_setup_data: dict[str, Any] = {}
-
-    async def _handle_driver_setup_request(
-        self, msg: DriverSetupRequest
-    ) -> SetupAction:
-        """
-        Handle initial setup request and store setup_data.
-
-        The Remote sends credentials via driver.json setup_data_schema in msg.setup_data.
-        We store this so we can use it after the restore prompt.
-        """
-        if msg.setup_data:
-            self._initial_setup_data = dict(msg.setup_data)
-            _LOG.info(
-                "Stored initial setup_data: provider=%s, username=%s",
-                self._initial_setup_data.get("provider"),
-                self._initial_setup_data.get("username"),
-            )
-
-        return await super()._handle_driver_setup_request(msg)
+    """Setup flow for Horizon integration."""
 
     async def get_pre_discovery_screen(self) -> RequestUserInput | None:
         """
-        Skip pre-discovery screen if we have setup_data from driver.json.
+        Show manual entry form since driver.json only has info screen.
 
-        The credentials were already provided via the driver.json setup_data_schema.
-        Store them in _pre_discovery_data so they're available during discovery.
+        This ensures credentials are collected via setup_flow.py, making the
+        integration resilient to backup/restore and reconfigure flows where
+        the Remote may not pass setup_data.
         """
-        if self._initial_setup_data:
-            self._pre_discovery_data = dict(self._initial_setup_data)
-            _LOG.info("Using stored setup_data for discovery")
-            return None
-        return None
+        return self.get_manual_entry_form()
 
     async def _handle_discovery(self) -> SetupAction:
         """
         Handle device discovery.
 
-        For Horizon, we use the credentials from driver.json (stored in _pre_discovery_data)
+        Uses credentials from _pre_discovery_data (collected via get_pre_discovery_screen)
         to authenticate and discover STB devices via cloud API.
-        This skips manual entry since credentials are already provided.
         """
         if self._pre_discovery_data:
-            _LOG.info("Discovering devices using pre-stored credentials")
+            provider = self._pre_discovery_data.get("provider")
+            username = self._pre_discovery_data.get("username")
+            password = self._pre_discovery_data.get("password")
+
+            if not all([provider, username, password]):
+                _LOG.info("Missing credentials in pre_discovery_data, showing form")
+                return self.get_manual_entry_form()
+
+            _LOG.info("Discovering devices using credentials")
             try:
                 result = await self.query_device(self._pre_discovery_data)
                 if hasattr(result, "identifier"):
@@ -81,17 +61,12 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
                 return result
             except Exception as err:
                 _LOG.error("Discovery failed: %s", err)
-                from ucapi import IntegrationSetupError, SetupError
-                return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
+                return self.get_manual_entry_form()
 
         return await self._handle_manual_entry()
 
     def get_manual_entry_form(self) -> RequestUserInput:
-        """
-        Return manual entry form for credentials.
-
-        This is only shown if setup_data wasn't provided via driver.json.
-        """
+        """Return manual entry form for provider and credentials."""
         return RequestUserInput(
             {"en": "LG Horizon Setup"},
             [
@@ -142,7 +117,8 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
         password = input_values.get("password")
 
         if not all([provider, username, password]):
-            raise ValueError("Missing required fields: provider, username, password")
+            _LOG.info("Missing required fields, returning manual entry form")
+            return self.get_manual_entry_form()
 
         config_id = (
             f"{provider}_{username}".lower().replace("@", "_").replace(".", "_")

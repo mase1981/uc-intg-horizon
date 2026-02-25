@@ -1,6 +1,6 @@
 {
   "driver_id": "horizon",
-  "version": "3.1.21",
+  "version": "3.1.22",
 
   "min_core_api": "1.0.0",
   "name": {
@@ -20,7 +20,7 @@
   },
   "home_page": "https://github.com/mase1981/uc-intg-horizon",
   "documentation": "https://github.com/mase1981/uc-intg-horizon/blob/main/README.md",
-  "release_date": "2026-02-23",
+  "release_date": "2026-02-25",
   "icon": "uc:tv",
   "setup_data_schema": {
     "title": {
@@ -30,76 +30,20 @@
     },
     "settings": [
       {
-        "id": "provider",
+        "id": "info",
         "label": {
-          "en": "Select Provider",
-          "de": "Anbieter auswählen",
-          "nl": "Selecteer provider"
+          "en": "Connect to Horizon Set-Top Box",
+          "de": "Verbindung zur Horizon Set-Top-Box",
+          "nl": "Verbinden met Horizon Settop Box"
         },
         "field": {
-          "dropdown": {
-            "items": [
-              {
-                "id": "Ziggo",
-                "label": {
-                  "en": "Ziggo (Netherlands)",
-                  "nl": "Ziggo (Nederland)"
-                }
-              },
-              {
-                "id": "VirginMedia",
-                "label": {
-                  "en": "Virgin Media (UK/Ireland)",
-                  "nl": "Virgin Media (VK/Ierland)"
-                }
-              },
-              {
-                "id": "Telenet",
-                "label": {
-                  "en": "Telenet (Belgium)",
-                  "nl": "Telenet (België)"
-                }
-              },
-              {
-                "id": "UPC",
-                "label": {
-                  "en": "UPC (Switzerland)",
-                  "de": "UPC (Schweiz)"
-                }
-              },
-              {
-                "id": "Sunrise",
-                "label": {
-                  "en": "Sunrise (Switzerland)",
-                  "de": "Sunrise (Schweiz)"
-                }
-              }
-            ]
+          "label": {
+            "value": {
+              "en": "Select your provider and enter your credentials in the next screen to discover your set-top boxes.",
+              "de": "Wählen Sie Ihren Anbieter und geben Sie Ihre Anmeldedaten im nächsten Bildschirm ein, um Ihre Set-Top-Boxen zu finden.",
+              "nl": "Selecteer uw provider en voer uw inloggegevens in op het volgende scherm om uw settop boxes te vinden."
+            }
           }
-        }
-      },
-      {
-        "id": "username",
-        "label": {
-          "en": "Username / Email",
-          "de": "Benutzername / E-Mail",
-          "nl": "Gebruikersnaam / E-mail"
-        },
-        "field": {
-          "text": {
-            "placeholder": "your.email@example.com"
-          }
-        }
-      },
-      {
-        "id": "password",
-        "label": {
-          "en": "Password (or Refresh Token for BE/GB/CH)",
-          "de": "Passwort (oder Refresh Token für BE/GB/CH)",
-          "nl": "Wachtwoord (of Refresh Token voor BE/GB/CH)"
-        },
-        "field": {
-          "password": {}
         }
       }
     ]
