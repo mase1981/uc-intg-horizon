@@ -210,6 +210,10 @@ class HorizonDevice(ExternalClientDevice):
         _LOG.debug("Waiting for devices to register on MQTT...")
 
         while elapsed < timeout:
+            if not self._api:
+                _LOG.debug("API disconnected during MQTT wait, aborting")
+                return
+
             devices = await self._api.get_devices()
             if devices:
                 ready_count = 0
