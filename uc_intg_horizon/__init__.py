@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 from ucapi_framework import BaseConfigManager, get_config_path
@@ -22,7 +23,10 @@ from uc_intg_horizon.setup_flow import HorizonSetupFlow
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-_DRIVER_JSON = str(Path(__file__).parent.parent.absolute() / "driver.json")
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    _DRIVER_JSON = str(Path(sys._MEIPASS) / "driver.json")
+else:
+    _DRIVER_JSON = str(Path(__file__).parent.parent.absolute() / "driver.json")
 
 try:
     with open(_DRIVER_JSON, "r", encoding="utf-8") as f:

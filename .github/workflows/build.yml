@@ -57,6 +57,8 @@ jobs:
                 --add-data driver.json:. \
                 --collect-all zeroconf \
                 --collect-all ucapi \
+                --collect-all ucapi_framework \
+                --collect-all lghorizon \
                 uc_intg_horizon/__init__.py"
 
       - name: Prepare artifacts
