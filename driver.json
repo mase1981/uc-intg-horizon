@@ -1,17 +1,16 @@
 {
   "driver_id": "horizon",
-  "version": "3.1.23",
-
-  "min_core_api": "1.0.0",
+  "version": "4.0.0",
+  "min_core_api": "0.22.0",
   "name": {
     "en": "LG Horizon Set-Top Box",
     "de": "LG Horizon Set-Top-Box",
     "nl": "LG Horizon Settop Box"
   },
   "description": {
-    "en": "Control your LG Horizon set-top boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) with full media player and remote control functionality. Now with seek support!",
-    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise) mit vollständiger Media Player- und Fernbedienungsfunktionalität. Jetzt mit Seek-Unterstützung!",
-    "nl": "Bedien uw LG Horizon settop boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) met volledige mediaspeler- en afstandsbedieningsfunctionaliteit. Nu met seek-ondersteuning!"
+    "en": "Control your LG Horizon set-top boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) with full media player, remote control, channel browser and seek support.",
+    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise) mit vollständiger Media Player-, Fernbedienungs-, Kanal-Browser- und Seek-Unterstützung.",
+    "nl": "Bedien uw LG Horizon settop boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) met volledige mediaspeler-, afstandsbediening-, kanaalbrowser- en seek-ondersteuning."
   },
   "developer": {
     "name": "Meir Miyara",
@@ -19,8 +18,7 @@
     "url": "https://github.com/mase1981"
   },
   "home_page": "https://github.com/mase1981/uc-intg-horizon",
-  "documentation": "https://github.com/mase1981/uc-intg-horizon/blob/main/README.md",
-  "release_date": "2026-02-26",
+  "release_date": "2026-03-24",
   "icon": "uc:tv",
   "setup_data_schema": {
     "title": {

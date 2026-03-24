@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """
 LG Horizon Integration entry point.
 
-:copyright: (c) 2025 by Meir Miyara.
+:copyright: (c) 2025-2026 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
 """
 

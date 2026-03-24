@@ -1,7 +1,7 @@
 """
 Sensor entities for Horizon integration.
 
-:copyright: (c) 2025 by Meir Miyara.
+:copyright: (c) 2025-2026 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
@@ -20,172 +20,97 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 
 
-class HorizonDeviceStateSensor(Sensor):
+class _BaseSensor(Sensor):
+    """Base sensor with common update pattern."""
+
+    def __init__(
+        self,
+        entity_id: str,
+        name: str,
+        horizon_device: HorizonDevice,
+        device_id: str,
+        api: ucapi.IntegrationAPI,
+    ) -> None:
+        self._device_id = device_id
+        self._horizon_device = horizon_device
+        self._api = api
+
+        super().__init__(
+            identifier=entity_id,
+            name=name,
+            features=[],
+            attributes={Attributes.STATE: States.UNAVAILABLE, Attributes.VALUE: ""},
+            device_class=DeviceClasses.CUSTOM,
+        )
+
+    def _push_if_configured(self) -> None:
+        if self._api and self._api.configured_entities.contains(self.id):
+            self._api.configured_entities.update_attributes(self.id, self.attributes)
+
+    async def update_state(self, device_state: dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    async def push_update(self) -> None:
+        state = self._horizon_device.get_device_state(self._device_id)
+        await self.update_state(state)
+
+
+class HorizonDeviceStateSensor(_BaseSensor):
     """Sensor entity for device connection state."""
 
     def __init__(
-        self,
-        device_id: str,
-        device_name: str,
-        horizon_device: HorizonDevice,
+        self, device_id: str, device_name: str, horizon_device: HorizonDevice,
         api: ucapi.IntegrationAPI,
     ) -> None:
-        """Initialize the device state sensor."""
-        self._device_id = device_id
-        self._horizon_device = horizon_device
-        self._api = api
-
-        entity_id = f"{device_id}_state"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-        }
-
         super().__init__(
-            identifier=entity_id,
-            name=f"{device_name} State",
-            features=[],
-            attributes=attributes,
-            device_class=DeviceClasses.CUSTOM,
+            f"{device_id}_state", f"{device_name} State",
+            horizon_device, device_id, api,
         )
 
-        _LOG.info("Initialized Horizon Device State Sensor: %s (%s)", device_name, entity_id)
-
     async def update_state(self, device_state: dict[str, Any]) -> None:
-        """Update sensor state from device state."""
-        try:
-            horizon_state = device_state.get("state", "unavailable")
-
-            if horizon_state in ["ONLINE_RUNNING", "ONLINE_STANDBY", "OFFLINE"]:
-                self.attributes[Attributes.STATE] = States.ON
-                self.attributes[Attributes.VALUE] = horizon_state
-            else:
-                self.attributes[Attributes.STATE] = States.UNAVAILABLE
-                self.attributes[Attributes.VALUE] = "Unknown"
-
-            if self._api and self._api.configured_entities.contains(self.id):
-                self._api.configured_entities.update_attributes(self.id, self.attributes)
-                _LOG.debug("Updated device state sensor: %s", horizon_state)
-
-        except Exception as e:
-            _LOG.error("Failed to update device state sensor: %s", e)
-
-    async def push_update(self) -> None:
-        """Push state update to UC Remote."""
-        device_state = await self._horizon_device.get_device_state(self._device_id)
-        await self.update_state(device_state)
+        horizon_state = device_state.get("state", "unavailable")
+        if horizon_state in ("ONLINE_RUNNING", "ONLINE_STANDBY", "OFFLINE"):
+            self.attributes[Attributes.STATE] = States.ON
+            self.attributes[Attributes.VALUE] = horizon_state
+        else:
+            self.attributes[Attributes.STATE] = States.UNAVAILABLE
+            self.attributes[Attributes.VALUE] = "Unknown"
+        self._push_if_configured()
 
 
-class HorizonChannelSensor(Sensor):
+class HorizonChannelSensor(_BaseSensor):
     """Sensor entity for current channel."""
 
     def __init__(
-        self,
-        device_id: str,
-        device_name: str,
-        horizon_device: HorizonDevice,
+        self, device_id: str, device_name: str, horizon_device: HorizonDevice,
         api: ucapi.IntegrationAPI,
     ) -> None:
-        """Initialize the channel sensor."""
-        self._device_id = device_id
-        self._horizon_device = horizon_device
-        self._api = api
-
-        entity_id = f"{device_id}_channel"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "",
-        }
-
         super().__init__(
-            identifier=entity_id,
-            name=f"{device_name} Channel",
-            features=[],
-            attributes=attributes,
-            device_class=DeviceClasses.CUSTOM,
+            f"{device_id}_channel", f"{device_name} Channel",
+            horizon_device, device_id, api,
         )
 
-        _LOG.info("Initialized Horizon Channel Sensor: %s (%s)", device_name, entity_id)
-
     async def update_state(self, device_state: dict[str, Any]) -> None:
-        """Update sensor state from device state."""
-        try:
-            channel_name = device_state.get("channel", "")
-
-            if channel_name:
-                self.attributes[Attributes.STATE] = States.ON
-                self.attributes[Attributes.VALUE] = channel_name
-            else:
-                self.attributes[Attributes.STATE] = States.ON
-                self.attributes[Attributes.VALUE] = "No Channel"
-
-            if self._api and self._api.configured_entities.contains(self.id):
-                self._api.configured_entities.update_attributes(self.id, self.attributes)
-                _LOG.debug("Updated channel sensor: %s", channel_name or "No Channel")
-
-        except Exception as e:
-            _LOG.error("Failed to update channel sensor: %s", e)
-
-    async def push_update(self) -> None:
-        """Push state update to UC Remote."""
-        device_state = await self._horizon_device.get_device_state(self._device_id)
-        await self.update_state(device_state)
+        channel = device_state.get("channel", "")
+        self.attributes[Attributes.STATE] = States.ON
+        self.attributes[Attributes.VALUE] = channel or "No Channel"
+        self._push_if_configured()
 
 
-class HorizonProgramSensor(Sensor):
+class HorizonProgramSensor(_BaseSensor):
     """Sensor entity for current program."""
 
     def __init__(
-        self,
-        device_id: str,
-        device_name: str,
-        horizon_device: HorizonDevice,
+        self, device_id: str, device_name: str, horizon_device: HorizonDevice,
         api: ucapi.IntegrationAPI,
     ) -> None:
-        """Initialize the program sensor."""
-        self._device_id = device_id
-        self._horizon_device = horizon_device
-        self._api = api
-
-        entity_id = f"{device_id}_program"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "",
-        }
-
         super().__init__(
-            identifier=entity_id,
-            name=f"{device_name} Program",
-            features=[],
-            attributes=attributes,
-            device_class=DeviceClasses.CUSTOM,
+            f"{device_id}_program", f"{device_name} Program",
+            horizon_device, device_id, api,
         )
 
-        _LOG.info("Initialized Horizon Program Sensor: %s (%s)", device_name, entity_id)
-
     async def update_state(self, device_state: dict[str, Any]) -> None:
-        """Update sensor state from device state."""
-        try:
-            program_title = device_state.get("media_title", "")
-
-            if program_title:
-                self.attributes[Attributes.STATE] = States.ON
-                self.attributes[Attributes.VALUE] = program_title
-            else:
-                self.attributes[Attributes.STATE] = States.ON
-                self.attributes[Attributes.VALUE] = "No Program"
-
-            if self._api and self._api.configured_entities.contains(self.id):
-                self._api.configured_entities.update_attributes(self.id, self.attributes)
-                _LOG.debug("Updated program sensor: %s", program_title or "No Program")
-
-        except Exception as e:
-            _LOG.error("Failed to update program sensor: %s", e)
-
-    async def push_update(self) -> None:
-        """Push state update to UC Remote."""
-        device_state = await self._horizon_device.get_device_state(self._device_id)
-        await self.update_state(device_state)
+        title = device_state.get("media_title", "")
+        self.attributes[Attributes.STATE] = States.ON
+        self.attributes[Attributes.VALUE] = title or "No Program"
+        self._push_if_configured()

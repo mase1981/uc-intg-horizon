@@ -57,7 +57,7 @@ jobs:
                 --add-data driver.json:. \
                 --collect-all zeroconf \
                 --collect-all ucapi \
-                uc_intg_horizon/__main__.py"
+                uc_intg_horizon/__init__.py"
 
       - name: Prepare artifacts
         shell: bash

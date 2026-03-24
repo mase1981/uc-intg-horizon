@@ -1,7 +1,7 @@
 """
 Media Player entity for Horizon integration.
 
-:copyright: (c) 2025 by Meir Miyara.
+:copyright: (c) 2025-2026 by Meir Miyara.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
@@ -10,17 +10,50 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
 from ucapi import MediaPlayer, StatusCodes
 from ucapi.media_player import Attributes, Commands, Features, States
+from ucapi.api_definitions import BrowseOptions, BrowseResults, SearchOptions, SearchResults
+
+from uc_intg_horizon import browser
+from uc_intg_horizon.const import CHANNEL_UPDATE_DELAY, POWER_COMMAND_DELAY, STREAMING_APPS
 
 if TYPE_CHECKING:
     import ucapi
     from uc_intg_horizon.device import HorizonDevice
 
 _LOG = logging.getLogger(__name__)
+
+FEATURES = [
+    Features.ON_OFF,
+    Features.TOGGLE,
+    Features.VOLUME_UP_DOWN,
+    Features.MUTE_TOGGLE,
+    Features.PLAY_PAUSE,
+    Features.STOP,
+    Features.NEXT,
+    Features.PREVIOUS,
+    Features.FAST_FORWARD,
+    Features.REWIND,
+    Features.RECORD,
+    Features.CHANNEL_SWITCHER,
+    Features.SELECT_SOURCE,
+    Features.DPAD,
+    Features.HOME,
+    Features.MENU,
+    Features.CONTEXT_MENU,
+    Features.GUIDE,
+    Features.INFO,
+    Features.MEDIA_TITLE,
+    Features.MEDIA_ARTIST,
+    Features.MEDIA_IMAGE_URL,
+    Features.MEDIA_POSITION,
+    Features.SEEK,
+    Features.PLAY_MEDIA,
+    Features.BROWSE_MEDIA,
+    Features.SEARCH_MEDIA,
+]
 
 
 class HorizonMediaPlayer(MediaPlayer):
@@ -34,41 +67,12 @@ class HorizonMediaPlayer(MediaPlayer):
         api: ucapi.IntegrationAPI,
         sensors: list | None = None,
     ) -> None:
-        """Initialize the media player entity."""
         self._device_id = device_id
         self._horizon_device = horizon_device
         self._api = api
         self._sensors = sensors or []
-        self._refresh_task: asyncio.Task | None = None
         self._channel_update_task: asyncio.Task | None = None
         self._last_good_metadata: dict[str, Any] = {}
-
-        features = [
-            Features.ON_OFF,
-            Features.TOGGLE,
-            Features.VOLUME_UP_DOWN,
-            Features.MUTE_TOGGLE,
-            Features.PLAY_PAUSE,
-            Features.STOP,
-            Features.NEXT,
-            Features.PREVIOUS,
-            Features.FAST_FORWARD,
-            Features.REWIND,
-            Features.RECORD,
-            Features.CHANNEL_SWITCHER,
-            Features.SELECT_SOURCE,
-            Features.DPAD,
-            Features.HOME,
-            Features.MENU,
-            Features.CONTEXT_MENU,
-            Features.GUIDE,
-            Features.INFO,
-            Features.MEDIA_TITLE,
-            Features.MEDIA_ARTIST,
-            Features.MEDIA_IMAGE_URL,
-            Features.MEDIA_POSITION,
-            Features.SEEK,
-        ]
 
         attributes = {
             Attributes.STATE: States.UNAVAILABLE,
@@ -85,78 +89,74 @@ class HorizonMediaPlayer(MediaPlayer):
         super().__init__(
             identifier=device_id,
             name=device_name,
-            features=features,
+            features=FEATURES,
             attributes=attributes,
             cmd_handler=self._handle_command,
         )
 
-        _LOG.info("Initialized Horizon Media Player: %s (%s)", device_name, device_id)
-
         asyncio.create_task(self._load_sources())
-        asyncio.create_task(self._start_periodic_refresh())
+        asyncio.create_task(self._periodic_refresh())
 
     async def _load_sources(self) -> None:
-        """Load available sources (channels)."""
         try:
             channels = await self._horizon_device.get_channels()
             source_list = [ch["name"] for ch in channels]
             self.attributes[Attributes.SOURCE_LIST] = source_list
             _LOG.info("Loaded %d sources for %s", len(source_list), self._device_id)
-        except Exception as e:
-            _LOG.error("Failed to load sources: %s", e)
+        except Exception as err:
+            _LOG.error("Failed to load sources: %s", err)
 
-    async def _start_periodic_refresh(self) -> None:
-        """Start periodic state refresh."""
-        _LOG.info("Starting 15-second periodic refresh for %s", self._device_id)
-
-        await asyncio.sleep(15)
+    async def _periodic_refresh(self) -> None:
+        from uc_intg_horizon.const import PERIODIC_REFRESH_INTERVAL
+        await asyncio.sleep(PERIODIC_REFRESH_INTERVAL)
 
         while True:
             try:
                 if self._api and self._api.configured_entities.contains(self.id):
-                    _LOG.debug("Periodic refresh for %s", self._device_id)
                     await self.push_update()
-
-                await asyncio.sleep(15)
-
+                await asyncio.sleep(PERIODIC_REFRESH_INTERVAL)
             except asyncio.CancelledError:
-                _LOG.info("Periodic refresh stopped for %s", self._device_id)
                 break
-            except Exception as e:
-                _LOG.error("Error in periodic refresh for %s: %s", self._device_id, e)
-                await asyncio.sleep(15)
+            except Exception as err:
+                _LOG.error("Periodic refresh error for %s: %s", self._device_id, err)
+                await asyncio.sleep(PERIODIC_REFRESH_INTERVAL)
+
+    async def browse(self, options: BrowseOptions) -> BrowseResults | StatusCodes:
+        return await browser.browse(self._horizon_device, self._device_id, options)
+
+    async def search(self, options: SearchOptions) -> SearchResults | StatusCodes:
+        return await browser.search(self._horizon_device, self._device_id, options)
 
     async def _handle_command(
         self, entity: Any, cmd_id: str, params: dict[str, Any] | None
     ) -> StatusCodes:
-        """Handle media player commands."""
-        _LOG.info("Media Player command: %s (params=%s)", cmd_id, params)
+        _LOG.info("[%s] Command: %s params=%s", self.id, cmd_id, params)
 
-        is_power_command = False
-        is_channel_command = False
+        is_power = False
+        is_channel = False
 
         try:
             if cmd_id == Commands.ON:
                 await self._horizon_device.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
-                is_power_command = True
+                is_power = True
 
             elif cmd_id == Commands.OFF:
                 await self._horizon_device.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.STANDBY
-                is_power_command = True
+                is_power = True
 
             elif cmd_id == Commands.TOGGLE:
                 await self._horizon_device.power_toggle(self._device_id)
-                current_state = self.attributes.get(Attributes.STATE)
-                if current_state in [States.ON, States.PLAYING, States.PAUSED]:
+                current = self.attributes.get(Attributes.STATE)
+                if current in [States.ON, States.PLAYING, States.PAUSED]:
                     self.attributes[Attributes.STATE] = States.STANDBY
                 else:
                     self.attributes[Attributes.STATE] = States.ON
-                is_power_command = True
+                is_power = True
 
             elif cmd_id == Commands.PLAY_PAUSE:
-                state = await self._horizon_device.get_device_state(self._device_id)
+                state = self._horizon_device.get_device_state(self._device_id)
                 if state.get("paused"):
                     await self._horizon_device.play(self._device_id)
                     self.attributes[Attributes.STATE] = States.PLAYING
@@ -170,11 +170,11 @@ class HorizonMediaPlayer(MediaPlayer):
 
             elif cmd_id == Commands.NEXT:
                 await self._horizon_device.next_channel(self._device_id)
-                is_channel_command = True
+                is_channel = True
 
             elif cmd_id == Commands.PREVIOUS:
                 await self._horizon_device.previous_channel(self._device_id)
-                is_channel_command = True
+                is_channel = True
 
             elif cmd_id == Commands.FAST_FORWARD:
                 await self._horizon_device.fast_forward(self._device_id)
@@ -192,9 +192,7 @@ class HorizonMediaPlayer(MediaPlayer):
                     if success:
                         self.attributes[Attributes.MEDIA_POSITION] = position
                     return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
-                else:
-                    _LOG.warning("SEEK called without media_position parameter")
-                    return StatusCodes.BAD_REQUEST
+                return StatusCodes.BAD_REQUEST
 
             elif cmd_id == Commands.VOLUME_UP:
                 await self._horizon_device.send_key(self._device_id, "VolumeUp")
@@ -204,78 +202,46 @@ class HorizonMediaPlayer(MediaPlayer):
 
             elif cmd_id == Commands.MUTE_TOGGLE:
                 await self._horizon_device.send_key(self._device_id, "VolumeMute")
-                muted = self.attributes.get(Attributes.MUTED, False)
-                self.attributes[Attributes.MUTED] = not muted
+                self.attributes[Attributes.MUTED] = not self.attributes.get(
+                    Attributes.MUTED, False
+                )
 
             elif cmd_id == Commands.CURSOR_UP:
                 await self._horizon_device.send_key(self._device_id, "ArrowUp")
-
             elif cmd_id == Commands.CURSOR_DOWN:
                 await self._horizon_device.send_key(self._device_id, "ArrowDown")
-
             elif cmd_id == Commands.CURSOR_LEFT:
                 await self._horizon_device.send_key(self._device_id, "ArrowLeft")
-
             elif cmd_id == Commands.CURSOR_RIGHT:
                 await self._horizon_device.send_key(self._device_id, "ArrowRight")
-
             elif cmd_id == Commands.CURSOR_ENTER:
                 await self._horizon_device.send_key(self._device_id, "Enter")
 
             elif cmd_id == Commands.HOME:
                 await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
-
             elif cmd_id == Commands.MENU:
                 await self._horizon_device.send_key(self._device_id, "Info")
-
             elif cmd_id == Commands.CONTEXT_MENU:
                 await self._horizon_device.send_key(self._device_id, "Options")
-
             elif cmd_id == Commands.GUIDE:
                 await self._horizon_device.send_key(self._device_id, "Guide")
-
             elif cmd_id == Commands.INFO:
                 await self._horizon_device.send_key(self._device_id, "Info")
-
             elif cmd_id == Commands.BACK:
                 await self._horizon_device.send_key(self._device_id, "Escape")
 
             elif cmd_id == Commands.CHANNEL_UP:
                 await self._horizon_device.next_channel(self._device_id)
-                is_channel_command = True
-
+                is_channel = True
             elif cmd_id == Commands.CHANNEL_DOWN:
                 await self._horizon_device.previous_channel(self._device_id)
-                is_channel_command = True
+                is_channel = True
 
             elif cmd_id == Commands.SELECT_SOURCE:
-                if params and "source" in params:
-                    source = params["source"]
-                    _LOG.info("Select source: %s", source)
+                return await self._handle_select_source(params)
 
-                    if source.startswith("HDMI") or source == "AV Input":
-                        await self._horizon_device.send_key(self._device_id, "Settings")
-                    elif source in [
-                        "Netflix",
-                        "BBC iPlayer",
-                        "ITVX",
-                        "All 4",
-                        "My5",
-                        "Prime Video",
-                        "YouTube",
-                        "Disney+",
-                    ]:
-                        await self._horizon_device.send_key(
-                            self._device_id, "MediaTopMenu"
-                        )
-                    else:
-                        await self._horizon_device.set_channel(self._device_id, source)
-                        is_channel_command = True
-
-                    self.attributes[Attributes.SOURCE] = source
-                else:
-                    _LOG.warning("SELECT_SOURCE called without source parameter")
-                    return StatusCodes.BAD_REQUEST
+            elif cmd_id == Commands.PLAY_MEDIA:
+                return await self._handle_play_media(params)
 
             elif cmd_id == "my_recordings":
                 await self._horizon_device.send_key(self._device_id, "Recordings")
@@ -283,95 +249,73 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id.startswith("channel_select:"):
                 channel = cmd_id.split(":", 1)[1]
                 await self._horizon_device.set_channel_by_number(self._device_id, channel)
-                is_channel_command = True
+                is_channel = True
 
             else:
-                _LOG.warning("Unsupported command: %s", cmd_id)
+                _LOG.warning("[%s] Unhandled command: %s", self.id, cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
 
-            if is_power_command:
-                await asyncio.sleep(3.0)
+            if is_power:
+                await asyncio.sleep(POWER_COMMAND_DELAY)
                 await self.push_update()
-            elif is_channel_command:
-                if self._channel_update_task and not self._channel_update_task.done():
-                    self._channel_update_task.cancel()
-                self._channel_update_task = asyncio.create_task(
-                    self._delayed_channel_update()
-                )
+            elif is_channel:
+                self._schedule_channel_update()
 
             return StatusCodes.OK
 
-        except Exception as e:
-            _LOG.error("Error handling command %s: %s", cmd_id, e, exc_info=True)
+        except Exception as err:
+            _LOG.error("[%s] Command error: %s", self.id, err, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
+    async def _handle_select_source(self, params: dict[str, Any] | None) -> StatusCodes:
+        if not params or "source" not in params:
+            return StatusCodes.BAD_REQUEST
+
+        source = params["source"]
+        if source.startswith("HDMI") or source == "AV Input":
+            await self._horizon_device.send_key(self._device_id, "Settings")
+        elif source in STREAMING_APPS:
+            await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
+        else:
+            await self._horizon_device.set_channel(self._device_id, source)
+            self._schedule_channel_update()
+
+        self.attributes[Attributes.SOURCE] = source
+        return StatusCodes.OK
+
+    async def _handle_play_media(self, params: dict[str, Any] | None) -> StatusCodes:
+        if not params:
+            return StatusCodes.BAD_REQUEST
+        media_id = params.get("media_id", "")
+        if not media_id:
+            return StatusCodes.BAD_REQUEST
+
+        if media_id.startswith("channel_"):
+            channel_name = media_id[8:]
+            await self._horizon_device.set_channel(self._device_id, channel_name)
+            self._schedule_channel_update()
+            return StatusCodes.OK
+
+        _LOG.warning("[%s] Unknown media_id: %s", self.id, media_id)
+        return StatusCodes.BAD_REQUEST
+
+    def _schedule_channel_update(self) -> None:
+        if self._channel_update_task and not self._channel_update_task.done():
+            self._channel_update_task.cancel()
+        self._channel_update_task = asyncio.create_task(self._delayed_channel_update())
+
     async def _delayed_channel_update(self) -> None:
-        """Background task to update artwork after channel change."""
         try:
-            await asyncio.sleep(2.5)
+            await asyncio.sleep(CHANNEL_UPDATE_DELAY)
             await self.push_update()
         except asyncio.CancelledError:
             raise
-        except Exception as e:
-            _LOG.error("Error in delayed channel update: %s", e)
+        except Exception as err:
+            _LOG.error("Delayed channel update error: %s", err)
 
-    def _calculate_position_duration(
-        self,
-        start_time: Any,
-        end_time: Any,
-        position: int | None = None,
-    ) -> tuple[int, int]:
-        """Calculate media position and duration."""
-        try:
-            if position is not None and start_time and end_time:
-                if isinstance(start_time, (int, float)):
-                    start_dt = datetime.fromtimestamp(start_time)
-                else:
-                    start_dt = datetime.fromisoformat(str(start_time))
-
-                if isinstance(end_time, (int, float)):
-                    end_dt = datetime.fromtimestamp(end_time)
-                else:
-                    end_dt = datetime.fromisoformat(str(end_time))
-
-                duration = int((end_dt - start_dt).total_seconds())
-                return (int(position), duration)
-
-            if start_time and end_time:
-                now = datetime.now()
-
-                if isinstance(start_time, (int, float)):
-                    start_dt = datetime.fromtimestamp(start_time)
-                else:
-                    start_dt = datetime.fromisoformat(str(start_time))
-
-                if isinstance(end_time, (int, float)):
-                    end_dt = datetime.fromtimestamp(end_time)
-                else:
-                    end_dt = datetime.fromisoformat(str(end_time))
-
-                position_seconds = int((now - start_dt).total_seconds())
-                duration_seconds = int((end_dt - start_dt).total_seconds())
-                position_seconds = max(0, min(position_seconds, duration_seconds))
-
-                return (position_seconds, duration_seconds)
-
-        except Exception as e:
-            _LOG.debug("Could not calculate position/duration: %s", e)
-
-        return (0, 0)
-
-    def _make_unique_image_url(self, base_url: str) -> str:
-        """Add unique query parameter to force image refresh."""
-        if not base_url:
-            return base_url
-
-        separator = "&" if "?" in base_url else "?"
-        timestamp = int(time.time() * 1000)
-        return f"{base_url}{separator}_t={timestamp}"
+    # -- Metadata degradation handling -----------------------------------------
 
     def _is_degraded_metadata(self, device_state: dict[str, Any]) -> bool:
-        """Check if metadata looks like degraded/placeholder values (e.g., BBC Launcher)."""
         channel = (device_state.get("channel") or "").strip()
         title = (device_state.get("media_title") or "").strip()
         image = (device_state.get("media_image") or "").lower()
@@ -384,40 +328,33 @@ class HorizonMediaPlayer(MediaPlayer):
             return True
         if not device_state.get("start_time") and not device_state.get("end_time"):
             return True
-
         return False
 
-    def _cache_good_metadata(self, device_state: dict[str, Any]) -> None:
-        """Cache valid metadata for fallback when degraded updates arrive."""
-        self._last_good_metadata = {
-            "channel": device_state.get("channel"),
-            "media_title": device_state.get("media_title"),
-            "media_image": device_state.get("media_image"),
-            "start_time": device_state.get("start_time"),
-            "end_time": device_state.get("end_time"),
-            "position": device_state.get("position"),
-            "duration": device_state.get("duration"),
-        }
-        _LOG.debug("Cached good metadata: channel=%s, title=%s",
-                   self._last_good_metadata.get("channel"),
-                   self._last_good_metadata.get("media_title"))
-
     def _get_effective_metadata(self, device_state: dict[str, Any]) -> dict[str, Any]:
-        """Return device_state or cached metadata if current state is degraded."""
         if self._is_degraded_metadata(device_state) and self._last_good_metadata:
-            _LOG.debug("Using cached metadata (current appears degraded: title=%s, image=%s)",
-                       device_state.get("media_title"), device_state.get("media_image"))
             return {**device_state, **self._last_good_metadata}
 
-        self._cache_good_metadata(device_state)
+        self._last_good_metadata = {
+            k: device_state.get(k)
+            for k in ("channel", "media_title", "media_image", "start_time", "end_time",
+                       "position", "duration")
+        }
         return device_state
 
+    @staticmethod
+    def _make_unique_image_url(base_url: str) -> str:
+        if not base_url:
+            return base_url
+        sep = "&" if "?" in base_url else "?"
+        return f"{base_url}{sep}_t={int(time.time() * 1000)}"
+
+    # -- Push update -----------------------------------------------------------
+
     async def push_update(self) -> None:
-        """Push state update to UC Remote."""
         if not self._api or not self._api.configured_entities.contains(self.id):
             return
 
-        device_state = await self._horizon_device.get_device_state(self._device_id)
+        device_state = self._horizon_device.get_device_state(self._device_id)
         horizon_state = device_state.get("state", "unavailable")
 
         if horizon_state == "ONLINE_RUNNING":
@@ -425,21 +362,21 @@ class HorizonMediaPlayer(MediaPlayer):
                 self.attributes[Attributes.STATE] = States.PAUSED
             else:
                 self.attributes[Attributes.STATE] = States.PLAYING
-            effective_state = self._get_effective_metadata(device_state)
+            effective = self._get_effective_metadata(device_state)
         elif horizon_state == "ONLINE_STANDBY":
             self.attributes[Attributes.STATE] = States.STANDBY
             self._last_good_metadata = {}
-            effective_state = device_state
+            effective = device_state
         elif horizon_state == "OFFLINE":
             self.attributes[Attributes.STATE] = States.OFF
             self._last_good_metadata = {}
-            effective_state = device_state
+            effective = device_state
         else:
             self.attributes[Attributes.STATE] = States.UNAVAILABLE
-            effective_state = device_state
+            effective = device_state
 
-        channel_name = effective_state.get("channel", "")
-        program_title = effective_state.get("media_title", "")
+        channel_name = effective.get("channel", "")
+        program_title = effective.get("media_title", "")
 
         if program_title:
             self.attributes[Attributes.MEDIA_TITLE] = program_title
@@ -451,17 +388,19 @@ class HorizonMediaPlayer(MediaPlayer):
             self.attributes[Attributes.MEDIA_TITLE] = ""
             self.attributes[Attributes.MEDIA_ARTIST] = ""
 
-        if effective_state.get("media_image"):
-            original_url = effective_state["media_image"]
-            unique_url = self._make_unique_image_url(original_url)
-            self.attributes[Attributes.MEDIA_IMAGE_URL] = unique_url
+        if effective.get("media_image"):
+            self.attributes[Attributes.MEDIA_IMAGE_URL] = self._make_unique_image_url(
+                effective["media_image"]
+            )
 
-        start_time = effective_state.get("start_time")
-        end_time = effective_state.get("end_time")
-        position = effective_state.get("position")
+        start_time = effective.get("start_time")
+        end_time = effective.get("end_time")
+        position = effective.get("position")
 
         if start_time and end_time:
-            pos, dur = self._calculate_position_duration(start_time, end_time, position)
+            pos, dur = self._horizon_device.calculate_position_duration(
+                start_time, end_time, position
+            )
             self.attributes[Attributes.MEDIA_POSITION] = pos
             self.attributes[Attributes.MEDIA_DURATION] = dur
         else:
@@ -469,7 +408,6 @@ class HorizonMediaPlayer(MediaPlayer):
             self.attributes[Attributes.MEDIA_DURATION] = 0
 
         self._api.configured_entities.update_attributes(self.id, self.attributes)
-        _LOG.debug("Pushed update for %s: %s", self.id, self.attributes[Attributes.STATE])
 
         for sensor in self._sensors:
             await sensor.update_state(device_state)
