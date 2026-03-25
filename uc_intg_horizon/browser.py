@@ -15,6 +15,7 @@ from ucapi.api_definitions import (
     BrowseMediaItem,
     BrowseOptions,
     BrowseResults,
+    MediaClass,
     Pagination,
     SearchOptions,
     SearchResults,
@@ -31,13 +32,15 @@ PAGE_SIZE = 50
 async def browse(
     device: HorizonDevice, device_id: str, options: BrowseOptions
 ) -> BrowseResults | StatusCodes:
-    item_id = getattr(options, "item_id", None) or ""
-    page = getattr(options, "page", 1) or 1
+    media_type = options.media_type or "root"
+    media_id = options.media_id or ""
 
-    if not item_id:
+    if media_type == "root" or (options.media_id is None and options.media_type is None):
         return _browse_root()
 
-    if item_id == "channels":
+    if media_type == "channels":
+        paging = options.paging
+        page = int((paging.page if paging and paging.page else None) or 1)
         return await _browse_channels(device, page)
 
     return StatusCodes.NOT_FOUND
@@ -46,36 +49,51 @@ async def browse(
 async def search(
     device: HorizonDevice, device_id: str, options: SearchOptions
 ) -> SearchResults | StatusCodes:
-    query = (getattr(options, "query", "") or "").strip().lower()
+    query = (options.query or "").strip().lower()
     if not query:
-        return StatusCodes.BAD_REQUEST
+        return SearchResults(media=[], pagination=Pagination(page=1, limit=0, count=0))
 
     channels = await device.get_channels()
     matches = [ch for ch in channels if query in ch["name"].lower()]
 
     items = [
         BrowseMediaItem(
-            id=f"channel_{ch['name']}",
             title=ch["name"],
-            browseable=False,
-            playable=True,
+            media_class=MediaClass.CHANNEL,
+            media_type="channel",
+            media_id=f"channel_{ch['name']}",
+            can_play=True,
+            can_browse=False,
         )
         for ch in matches[:PAGE_SIZE]
     ]
 
-    return SearchResults(items=items)
+    return SearchResults(
+        media=items,
+        pagination=Pagination(page=1, limit=len(items), count=len(items)),
+    )
 
 
 def _browse_root() -> BrowseResults:
     return BrowseResults(
-        items=[
-            BrowseMediaItem(
-                id="channels",
-                title="Channels",
-                browseable=True,
-                playable=False,
-            ),
-        ]
+        media=BrowseMediaItem(
+            title="Horizon",
+            media_class=MediaClass.DIRECTORY,
+            media_type="root",
+            media_id="root",
+            can_browse=True,
+            items=[
+                BrowseMediaItem(
+                    title="Channels",
+                    media_class=MediaClass.DIRECTORY,
+                    media_type="channels",
+                    media_id="channels",
+                    can_browse=True,
+                    can_play=False,
+                ),
+            ],
+        ),
+        pagination=Pagination(page=1, limit=1, count=1),
     )
 
 
@@ -88,22 +106,25 @@ async def _browse_channels(device: HorizonDevice, page: int) -> BrowseResults:
 
     items = [
         BrowseMediaItem(
-            id=f"channel_{ch['name']}",
             title=ch["name"],
-            browseable=False,
-            playable=True,
+            media_class=MediaClass.CHANNEL,
+            media_type="channel",
+            media_id=f"channel_{ch['name']}",
+            can_play=True,
+            can_browse=False,
         )
         for ch in page_channels
     ]
 
-    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE if total > 0 else 1
-
     return BrowseResults(
-        items=items,
-        pagination=Pagination(
-            page=page,
-            limit=PAGE_SIZE,
-            total=total,
-            total_pages=total_pages,
+        media=BrowseMediaItem(
+            title="Channels",
+            media_class=MediaClass.DIRECTORY,
+            media_type="channels",
+            media_id="channels",
+            can_browse=True,
+            can_search=True,
+            items=items,
         ),
+        pagination=Pagination(page=page, limit=PAGE_SIZE, count=total),
     )

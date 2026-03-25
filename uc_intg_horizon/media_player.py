@@ -94,14 +94,18 @@ class HorizonMediaPlayer(MediaPlayer):
             cmd_handler=self._handle_command,
         )
 
+        self._sources_loaded = False
         asyncio.create_task(self._load_sources())
         asyncio.create_task(self._periodic_refresh())
 
     async def _load_sources(self) -> None:
         try:
             channels = await self._horizon_device.get_channels()
+            if not channels:
+                return
             source_list = [ch["name"] for ch in channels]
             self.attributes[Attributes.SOURCE_LIST] = source_list
+            self._sources_loaded = True
             _LOG.info("Loaded %d sources for %s", len(source_list), self._device_id)
         except Exception as err:
             _LOG.error("Failed to load sources: %s", err)
@@ -406,6 +410,9 @@ class HorizonMediaPlayer(MediaPlayer):
         else:
             self.attributes[Attributes.MEDIA_POSITION] = 0
             self.attributes[Attributes.MEDIA_DURATION] = 0
+
+        if not self._sources_loaded and self._horizon_device.channels_loaded:
+            await self._load_sources()
 
         self._api.configured_entities.update_attributes(self.id, self.attributes)
 

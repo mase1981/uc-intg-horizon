@@ -41,6 +41,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
+logging.getLogger("lghorizon").setLevel(logging.INFO)
 
 _LOG = logging.getLogger(__name__)
 

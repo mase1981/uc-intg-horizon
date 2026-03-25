@@ -34,6 +34,7 @@ class HorizonChannelSelect(Select):
         self._device_id = device_id
         self._horizon_device = horizon_device
         self._api = api
+        self._channels_populated = False
 
         super().__init__(
             identifier=f"{device_id}_channel_select",
@@ -52,9 +53,12 @@ class HorizonChannelSelect(Select):
     async def _load_channels(self) -> None:
         try:
             channels = await self._horizon_device.get_channels()
+            if not channels:
+                return
             options = [ch["name"] for ch in channels]
             self.attributes[Attributes.OPTIONS] = options
             self.attributes[Attributes.STATE] = States.ON
+            self._channels_populated = True
             _LOG.info("Loaded %d channels for select %s", len(options), self._device_id)
         except Exception as err:
             _LOG.error("Failed to load channels for select: %s", err)
@@ -91,6 +95,9 @@ class HorizonChannelSelect(Select):
 
         if channel:
             self.attributes[Attributes.OPTION] = channel
+
+        if not self._channels_populated and self._horizon_device.channels_loaded:
+            await self._load_channels()
 
         if self._api and self._api.configured_entities.contains(self.id):
             self._api.configured_entities.update_attributes(self.id, self.attributes)

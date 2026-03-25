@@ -143,11 +143,10 @@ class HorizonDevice(ExternalClientDevice):
             raise RuntimeError("API not initialized")
 
         last_err: Exception | None = None
+        original_refresh_channels = self._api._refresh_channels
 
         for attempt in range(CONNECT_RETRIES):
             try:
-                original_refresh_channels = self._api._refresh_channels
-
                 async def _deferred_channels():
                     pass
 
