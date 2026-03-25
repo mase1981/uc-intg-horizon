@@ -235,7 +235,17 @@ class HorizonDevice(ExternalClientDevice):
     async def _on_device_state_change(self, device_id: str) -> None:
         _LOG.debug("Device state changed: %s", device_id)
         state = self.get_device_state(device_id)
-        self.events.emit(DeviceEvents.UPDATE, device_id, state)
+        mapped_state = dict(state)
+        horizon_state = mapped_state.get("state", "unavailable")
+        if horizon_state == "ONLINE_RUNNING":
+            mapped_state["state"] = "PAUSED" if mapped_state.get("paused") else "PLAYING"
+        elif horizon_state == "ONLINE_STANDBY":
+            mapped_state["state"] = "STANDBY"
+        elif horizon_state == "OFFLINE":
+            mapped_state["state"] = "OFF"
+        else:
+            mapped_state["state"] = "UNAVAILABLE"
+        self.events.emit(DeviceEvents.UPDATE, device_id, mapped_state)
 
     # -- Device state ----------------------------------------------------------
 

@@ -104,12 +104,15 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             self._remotes[device_id] = remote
             self.api.available_entities.add(remote)
 
-            select = HorizonChannelSelect(device_id, device_name, device, self.api)
-            self._selects[device_id] = select
-            self.api.available_entities.add(select)
-
             for sensor in sensors:
                 self.api.available_entities.add(sensor)
+
+            try:
+                select = HorizonChannelSelect(device_id, device_name, device, self.api)
+                self._selects[device_id] = select
+                self.api.available_entities.add(select)
+            except Exception as err:
+                _LOG.error("Failed to create select entity for %s: %s", device_id, err)
 
             _LOG.info("Created entities for STB: %s (%s)", device_name, device_id)
 

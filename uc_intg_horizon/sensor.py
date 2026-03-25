@@ -69,7 +69,10 @@ class HorizonDeviceStateSensor(_BaseSensor):
 
     async def update_state(self, device_state: dict[str, Any]) -> None:
         horizon_state = device_state.get("state", "unavailable")
-        if horizon_state in ("ONLINE_RUNNING", "ONLINE_STANDBY", "OFFLINE"):
+        if horizon_state in (
+            "PLAYING", "PAUSED", "STANDBY", "ON", "OFF",
+            "ONLINE_RUNNING", "ONLINE_STANDBY", "OFFLINE",
+        ):
             self.attributes[Attributes.STATE] = States.ON
             self.attributes[Attributes.VALUE] = horizon_state
         else:

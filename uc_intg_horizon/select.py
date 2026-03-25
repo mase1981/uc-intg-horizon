@@ -12,7 +12,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from ucapi import StatusCodes
-from ucapi.select import Attributes, Commands, Features, Options, States, Select
+from ucapi.select import Attributes, Commands, States, Select
 
 if TYPE_CHECKING:
     import ucapi
@@ -39,11 +39,10 @@ class HorizonChannelSelect(Select):
         super().__init__(
             identifier=f"{device_id}_channel_select",
             name=f"{device_name} Channel",
-            features=[Features.OPTION],
             attributes={
                 Attributes.STATE: States.UNAVAILABLE,
                 Attributes.OPTIONS: [],
-                Attributes.OPTION: "",
+                Attributes.CURRENT_OPTION: "",
             },
             cmd_handler=self._handle_command,
         )
@@ -75,7 +74,7 @@ class HorizonChannelSelect(Select):
             channel_name = params["option"]
             success = await self._horizon_device.set_channel(self._device_id, channel_name)
             if success:
-                self.attributes[Attributes.OPTION] = channel_name
+                self.attributes[Attributes.CURRENT_OPTION] = channel_name
                 if self._api and self._api.configured_entities.contains(self.id):
                     self._api.configured_entities.update_attributes(self.id, self.attributes)
             return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
@@ -86,15 +85,18 @@ class HorizonChannelSelect(Select):
         horizon_state = device_state.get("state", "unavailable")
         channel = device_state.get("channel", "")
 
-        if horizon_state in ("ONLINE_RUNNING", "ONLINE_STANDBY"):
+        if horizon_state in (
+            "PLAYING", "PAUSED", "STANDBY", "ON",
+            "ONLINE_RUNNING", "ONLINE_STANDBY",
+        ):
             self.attributes[Attributes.STATE] = States.ON
-        elif horizon_state == "OFFLINE":
-            self.attributes[Attributes.STATE] = States.OFF
+        elif horizon_state in ("OFF", "OFFLINE", "UNAVAILABLE"):
+            self.attributes[Attributes.STATE] = States.UNAVAILABLE
         else:
             self.attributes[Attributes.STATE] = States.UNAVAILABLE
 
         if channel:
-            self.attributes[Attributes.OPTION] = channel
+            self.attributes[Attributes.CURRENT_OPTION] = channel
 
         if not self._channels_populated and self._horizon_device.channels_loaded:
             await self._load_channels()
