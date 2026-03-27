@@ -340,8 +340,7 @@ class HorizonMediaPlayer(MediaPlayer):
 
         self._last_good_metadata = {
             k: device_state.get(k)
-            for k in ("channel", "media_title", "media_image", "start_time", "end_time",
-                       "position", "duration")
+            for k in ("channel", "media_title", "media_image", "start_time", "end_time")
         }
         return device_state
 
@@ -397,13 +396,14 @@ class HorizonMediaPlayer(MediaPlayer):
                 effective["media_image"]
             )
 
+        self.attributes[Attributes.SOURCE] = channel_name
+
         start_time = effective.get("start_time")
         end_time = effective.get("end_time")
-        position = effective.get("position")
 
         if start_time and end_time:
             pos, dur = self._horizon_device.calculate_position_duration(
-                start_time, end_time, position
+                start_time, end_time
             )
             self.attributes[Attributes.MEDIA_POSITION] = pos
             self.attributes[Attributes.MEDIA_DURATION] = dur
@@ -416,5 +416,10 @@ class HorizonMediaPlayer(MediaPlayer):
 
         self._api.configured_entities.update_attributes(self.id, self.attributes)
 
+        sensor_state = {
+            "state": horizon_state,
+            "channel": channel_name,
+            "media_title": program_title,
+        }
         for sensor in self._sensors:
-            await sensor.update_state(device_state)
+            await sensor.update_state(sensor_state)

@@ -191,12 +191,17 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         if device_id in self._selects:
             select = self._selects[device_id]
             if self.api.configured_entities.contains(select.id):
-                await select.update_state(state)
+                device_state = self._get_device_state_for_select(device_id)
+                await select.update_state(device_state)
 
-        if device_id in self._sensors:
-            for sensor in self._sensors[device_id]:
-                if self.api.configured_entities.contains(sensor.id):
-                    await sensor.update_state(state)
+    def _get_device_state_for_select(self, device_id: str) -> dict[str, Any]:
+        config_id = self._stb_to_config.get(device_id)
+        if not config_id:
+            return {"state": "unavailable"}
+        device = self._device_instances.get(config_id)
+        if not device:
+            return {"state": "unavailable"}
+        return device.get_device_state(device_id)
 
     async def connect_devices(self) -> bool:
         if not self.config_manager:
