@@ -19,7 +19,6 @@ from uc_intg_horizon.config import HorizonConfig
 from uc_intg_horizon.device import HorizonDevice
 from uc_intg_horizon.media_player import HorizonMediaPlayer
 from uc_intg_horizon.remote import HorizonRemote
-from uc_intg_horizon.select import HorizonChannelSelect
 from uc_intg_horizon.sensor import (
     HorizonChannelSensor,
     HorizonDeviceStateSensor,
@@ -28,7 +27,7 @@ from uc_intg_horizon.sensor import (
 
 _LOG = logging.getLogger(__name__)
 
-_ENTITY_SUFFIXES = ("_remote", "_state", "_channel", "_program", "_channel_select")
+_ENTITY_SUFFIXES = ("_remote", "_state", "_channel", "_program")
 _RETRY_DELAYS = [5, 10, 20, 30, 60, 120, 300]
 
 
@@ -43,7 +42,6 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         )
         self._media_players: dict[str, HorizonMediaPlayer] = {}
         self._remotes: dict[str, HorizonRemote] = {}
-        self._selects: dict[str, HorizonChannelSelect] = {}
         self._sensors: dict[str, list] = {}
         self._retry_task: asyncio.Task | None = None
         self._stb_to_config: dict[str, str] = {}
@@ -67,8 +65,6 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             return "remote"
         if entity_id.endswith(("_state", "_channel", "_program")):
             return "sensor"
-        if entity_id.endswith("_channel_select"):
-            return "select"
         return "media_player"
 
     def sub_device_from_entity_id(self, entity_id: str) -> str | None:
@@ -107,20 +103,12 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             for sensor in sensors:
                 self.api.available_entities.add(sensor)
 
-            try:
-                select = HorizonChannelSelect(device_id, device_name, device, self.api)
-                self._selects[device_id] = select
-                self.api.available_entities.add(select)
-            except Exception as err:
-                _LOG.error("Failed to create select entity for %s: %s", device_id, err)
-
             _LOG.info("Created entities for STB: %s (%s)", device_name, device_id)
 
     def on_device_removed(self, device_or_config: HorizonDevice | HorizonConfig | None) -> None:
         if device_or_config is None:
             self._media_players.clear()
             self._remotes.clear()
-            self._selects.clear()
             self._sensors.clear()
             self._stb_to_config.clear()
             self.api.available_entities.clear()
@@ -139,7 +127,6 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             for store, attr in [
                 (self._media_players, "id"),
                 (self._remotes, "id"),
-                (self._selects, "id"),
             ]:
                 entity = store.pop(device_id, None)
                 if entity:
@@ -158,7 +145,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
                     await entity.push_update()
 
     def _find_entity(self, entity_id: str) -> Any | None:
-        for store in (self._media_players, self._remotes, self._selects):
+        for store in (self._media_players, self._remotes):
             for entity in store.values():
                 if entity.id == entity_id:
                     return entity
@@ -187,21 +174,6 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             remote = self._remotes[device_id]
             if self.api.configured_entities.contains(remote.id):
                 await remote.push_update()
-
-        if device_id in self._selects:
-            select = self._selects[device_id]
-            if self.api.configured_entities.contains(select.id):
-                device_state = self._get_device_state_for_select(device_id)
-                await select.update_state(device_state)
-
-    def _get_device_state_for_select(self, device_id: str) -> dict[str, Any]:
-        config_id = self._stb_to_config.get(device_id)
-        if not config_id:
-            return {"state": "unavailable"}
-        device = self._device_instances.get(config_id)
-        if not device:
-            return {"state": "unavailable"}
-        return device.get_device_state(device_id)
 
     async def connect_devices(self) -> bool:
         if not self.config_manager:

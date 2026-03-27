@@ -14,6 +14,8 @@ import ssl
 from datetime import datetime
 from typing import Any
 
+import json
+
 import aiohttp
 import certifi
 
@@ -24,6 +26,7 @@ from lghorizon import (
     LGHorizonDevice as LGDevice,
     LGHorizonRunningState,
 )
+from lghorizon.helpers import make_id
 from ucapi_framework.device import ExternalClientDevice, DeviceEvents
 
 from uc_intg_horizon.config import HorizonConfig
@@ -452,7 +455,30 @@ class HorizonDevice(ExternalClientDevice):
         if not device:
             return False
         try:
-            await device.set_channel(channel_name)
+            channels = device._channels
+            match = [ch for ch in channels.values() if ch.title == channel_name]
+            if not match:
+                _LOG.error("Channel not found: %s", channel_name)
+                return False
+            channel = match[0]
+            payload = {
+                "id": await make_id(8),
+                "type": "CPE.pushToTV",
+                "source": {
+                    "clientId": device._mqtt_client.client_id,
+                    "friendlyDeviceName": "Remote",
+                },
+                "status": {
+                    "sourceType": "linear",
+                    "source": {"channelId": channel.id},
+                    "relativePosition": 0,
+                    "speed": 1,
+                },
+            }
+            await device._mqtt_client.publish_message(
+                f"{device._auth.household_id}/{device.device_id}",
+                json.dumps(payload),
+            )
             return True
         except Exception as err:
             _LOG.error("Set channel failed for %s: %s", device_id, err)
