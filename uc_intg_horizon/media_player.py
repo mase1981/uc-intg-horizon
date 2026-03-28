@@ -304,6 +304,7 @@ class HorizonMediaPlayer(MediaPlayer):
         return StatusCodes.BAD_REQUEST
 
     def _schedule_channel_update(self) -> None:
+        self._last_good_metadata = {}
         if self._channel_update_task and not self._channel_update_task.done():
             self._channel_update_task.cancel()
         self._channel_update_task = asyncio.create_task(self._delayed_channel_update())
