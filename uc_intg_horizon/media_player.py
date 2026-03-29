@@ -304,7 +304,6 @@ class HorizonMediaPlayer(MediaPlayer):
         return StatusCodes.BAD_REQUEST
 
     def _schedule_channel_update(self) -> None:
-        self._last_good_metadata = {}
         if self._channel_update_task and not self._channel_update_task.done():
             self._channel_update_task.cancel()
         self._channel_update_task = asyncio.create_task(self._delayed_channel_update())
@@ -336,8 +335,13 @@ class HorizonMediaPlayer(MediaPlayer):
         return False
 
     def _get_effective_metadata(self, device_state: dict[str, Any]) -> dict[str, Any]:
+        current_channel = (device_state.get("channel") or "").strip()
+
         if self._is_degraded_metadata(device_state) and self._last_good_metadata:
-            return {**device_state, **self._last_good_metadata}
+            cached_channel = self._last_good_metadata.get("channel", "")
+            if current_channel and current_channel == cached_channel:
+                return {**device_state, **self._last_good_metadata}
+            return device_state
 
         self._last_good_metadata = {
             k: device_state.get(k)

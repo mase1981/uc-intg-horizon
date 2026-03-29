@@ -1,6 +1,6 @@
 {
   "driver_id": "horizon",
-  "version": "4.0.7",
+  "version": "4.0.8",
   "min_core_api": "0.22.0",
   "name": {
     "en": "LG Horizon Set-Top Box",
@@ -18,7 +18,7 @@
     "url": "https://github.com/mase1981"
   },
   "home_page": "https://github.com/mase1981/uc-intg-horizon",
-  "release_date": "2026-03-28",
+  "release_date": "2026-03-29",
   "icon": "uc:tv",
   "setup_data_schema": {
     "title": {
