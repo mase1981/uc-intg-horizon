@@ -1,6 +1,6 @@
 {
   "driver_id": "horizon",
-  "version": "4.0.10",
+  "version": "4.0.11",
   "min_core_api": "0.22.0",
   "name": {
     "en": "LG Horizon Set-Top Box",

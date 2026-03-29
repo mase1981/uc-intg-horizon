@@ -352,7 +352,9 @@ class HorizonMediaPlayer(MediaPlayer):
                 }
             if self._last_good_metadata:
                 cached_channel = self._last_good_metadata.get("channel", "")
-                if current_channel and current_channel == cached_channel:
+                if not current_channel or current_channel == "No Channel":
+                    return {**device_state, **self._last_good_metadata}
+                if current_channel == cached_channel:
                     return {**device_state, **self._last_good_metadata}
             return device_state
 
