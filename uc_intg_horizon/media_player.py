@@ -410,10 +410,13 @@ class HorizonMediaPlayer(MediaPlayer):
             self.attributes[Attributes.MEDIA_TITLE] = ""
             self.attributes[Attributes.MEDIA_ARTIST] = ""
 
-        if effective.get("media_image"):
+        media_image = effective.get("media_image", "")
+        if media_image:
             self.attributes[Attributes.MEDIA_IMAGE_URL] = self._make_unique_image_url(
-                effective["media_image"]
+                media_image
             )
+        elif self._pending_channel:
+            self.attributes[Attributes.MEDIA_IMAGE_URL] = ""
 
         self.attributes[Attributes.SOURCE] = channel_name
 
