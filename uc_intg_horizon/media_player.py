@@ -73,6 +73,7 @@ class HorizonMediaPlayer(MediaPlayer):
         self._sensors = sensors or []
         self._channel_update_task: asyncio.Task | None = None
         self._last_good_metadata: dict[str, Any] = {}
+        self._pending_channel: str = ""
 
         attributes = {
             Attributes.STATE: States.UNAVAILABLE,
@@ -281,6 +282,7 @@ class HorizonMediaPlayer(MediaPlayer):
         elif source in STREAMING_APPS:
             await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
         else:
+            self._pending_channel = source
             await self._horizon_device.set_channel(self._device_id, source)
             self._schedule_channel_update()
 
@@ -296,6 +298,7 @@ class HorizonMediaPlayer(MediaPlayer):
 
         if media_id.startswith("channel_"):
             channel_name = media_id[8:]
+            self._pending_channel = channel_name
             await self._horizon_device.set_channel(self._device_id, channel_name)
             self._schedule_channel_update()
             return StatusCodes.OK
@@ -337,12 +340,23 @@ class HorizonMediaPlayer(MediaPlayer):
     def _get_effective_metadata(self, device_state: dict[str, Any]) -> dict[str, Any]:
         current_channel = (device_state.get("channel") or "").strip()
 
-        if self._is_degraded_metadata(device_state) and self._last_good_metadata:
-            cached_channel = self._last_good_metadata.get("channel", "")
-            if current_channel and current_channel == cached_channel:
-                return {**device_state, **self._last_good_metadata}
+        if self._is_degraded_metadata(device_state):
+            if self._pending_channel:
+                return {
+                    **device_state,
+                    "channel": self._pending_channel,
+                    "media_title": "",
+                    "media_image": "",
+                    "start_time": None,
+                    "end_time": None,
+                }
+            if self._last_good_metadata:
+                cached_channel = self._last_good_metadata.get("channel", "")
+                if current_channel and current_channel == cached_channel:
+                    return {**device_state, **self._last_good_metadata}
             return device_state
 
+        self._pending_channel = ""
         self._last_good_metadata = {
             k: device_state.get(k)
             for k in ("channel", "media_title", "media_image", "start_time", "end_time")
