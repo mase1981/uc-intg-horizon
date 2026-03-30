@@ -62,64 +62,63 @@ BUTTON_MAPPING = [
 
 
 def _create_main_page() -> UiPage:
-    page = UiPage("main", "Main Control", grid=Size(4, 6))
-    page.add(create_ui_text("ON", 0, 0, cmd="POWER_ON"))
-    page.add(create_ui_text("OFF", 1, 0, cmd="POWER_OFF"))
-    page.add(create_ui_text("TV", 2, 0, cmd="TV"))
-    page.add(create_ui_text("SRC", 3, 0, cmd="SOURCE"))
-    page.add(create_ui_icon("uc:up-arrow", 1, 1, cmd="UP"))
-    page.add(create_ui_icon("uc:left-arrow", 0, 2, cmd="LEFT"))
-    page.add(create_ui_text("OK", 1, 2, size=Size(2, 1), cmd="SELECT"))
-    page.add(create_ui_icon("uc:right-arrow", 3, 2, cmd="RIGHT"))
-    page.add(create_ui_icon("uc:down-arrow", 1, 3, cmd="DOWN"))
-    page.add(create_ui_text("P/P", 0, 4, size=Size(2, 1), cmd="PLAYPAUSE"))
-    page.add(create_ui_icon("uc:stop", 2, 4, cmd="STOP"))
-    page.add(create_ui_text("REC", 3, 4, cmd="RECORD"))
-    page.add(create_ui_icon("uc:home", 0, 5, cmd="HOME"))
-    page.add(create_ui_icon("uc:back", 1, 5, cmd="BACK"))
-    page.add(create_ui_icon("uc:menu", 2, 5, cmd="MENU"))
-    page.add(create_ui_icon("uc:guide", 3, 5, cmd="GUIDE"))
+    page = UiPage("main", "Main Control", grid=Size(3, 6))
+    page.add(create_ui_icon("uc:ballot", 0, 0, cmd="GUIDE"))
+    page.add(create_ui_icon("uc:house-blank", 1, 0, cmd="HOME"))
+    page.add(create_ui_icon("uc:power-off", 2, 0, cmd="POWER_TOGGLE"))
+    page.add(create_ui_icon("uc:cassette-vhs", 0, 1, cmd="DVR"))
+    page.add(create_ui_icon("uc:tv", 2, 1, cmd="TV"))
+    page.add(create_ui_icon("uc:chevron-up", 1, 2, cmd="UP"))
+    page.add(create_ui_icon("uc:chevron-left", 0, 3, cmd="LEFT"))
+    page.add(create_ui_icon("uc:circle-check", 1, 3, cmd="SELECT"))
+    page.add(create_ui_icon("uc:chevron-right", 2, 3, cmd="RIGHT"))
+    page.add(create_ui_icon("uc:chevron-down", 1, 4, cmd="DOWN"))
+    page.add(create_ui_icon("uc:reply", 0, 5, cmd="BACK"))
+    page.add(create_ui_icon("uc:ellipsis", 2, 5, cmd="MENU"))
     return page
 
 
 def _create_numbers_page() -> UiPage:
-    page = UiPage("numbers", "Channel Numbers", grid=Size(4, 6))
-    page.add(create_ui_text("1", 0, 1, cmd="1"))
-    page.add(create_ui_text("2", 1, 1, cmd="2"))
-    page.add(create_ui_text("3", 2, 1, cmd="3"))
-    page.add(create_ui_text("4", 0, 2, cmd="4"))
-    page.add(create_ui_text("5", 1, 2, cmd="5"))
-    page.add(create_ui_text("6", 2, 2, cmd="6"))
-    page.add(create_ui_text("7", 0, 3, cmd="7"))
-    page.add(create_ui_text("8", 1, 3, cmd="8"))
-    page.add(create_ui_text("9", 2, 3, cmd="9"))
-    page.add(create_ui_text("0", 1, 4, cmd="0"))
-    page.add(create_ui_icon("uc:up-arrow", 3, 1, cmd="CHANNEL_UP"))
-    page.add(create_ui_icon("uc:down-arrow", 3, 2, cmd="CHANNEL_DOWN"))
-    page.add(create_ui_text("OK", 0, 5, size=Size(2, 1), cmd="SELECT"))
+    page = UiPage("numbers", "Channel Numbers", grid=Size(4, 4))
+    page.add(create_ui_icon("uc:1", 0, 0, cmd="1"))
+    page.add(create_ui_icon("uc:2", 1, 0, cmd="2"))
+    page.add(create_ui_icon("uc:3", 2, 0, cmd="3"))
+    page.add(create_ui_icon("uc:4", 0, 1, cmd="4"))
+    page.add(create_ui_icon("uc:5", 1, 1, cmd="5"))
+    page.add(create_ui_icon("uc:6", 2, 1, cmd="6"))
+    page.add(create_ui_icon("uc:7", 0, 2, cmd="7"))
+    page.add(create_ui_icon("uc:8", 1, 2, cmd="8"))
+    page.add(create_ui_icon("uc:9", 2, 2, cmd="9"))
+    page.add(create_ui_icon("uc:0", 1, 3, cmd="0"))
+    page.add(create_ui_icon("uc:arrow-up-long", 3, 0, cmd="CHANNEL_UP"))
+    page.add(create_ui_icon("uc:arrow-down-long", 3, 1, cmd="CHANNEL_DOWN"))
+    page.add(create_ui_icon("uc:circle-check", 3, 3, cmd="SELECT"))
     return page
 
 
 def _create_playback_page() -> UiPage:
-    page = UiPage("playback", "Playback", grid=Size(4, 6))
-    page.add(create_ui_icon("uc:prev", 0, 1, size=Size(2, 2), cmd="REWIND"))
-    page.add(create_ui_icon("uc:next", 2, 1, size=Size(2, 2), cmd="FASTFORWARD"))
-    page.add(create_ui_text("P/P", 0, 3, size=Size(2, 2), cmd="PLAYPAUSE"))
-    page.add(create_ui_icon("uc:stop", 2, 3, cmd="STOP"))
-    page.add(create_ui_text("REC", 3, 3, cmd="RECORD"))
-    page.add(create_ui_text("VOL+", 0, 5, cmd="VOLUME_UP"))
-    page.add(create_ui_text("VOL-", 1, 5, cmd="VOLUME_DOWN"))
-    page.add(create_ui_text("MUTE", 2, 5, size=Size(2, 1), cmd="MUTE"))
+    page = UiPage("playback", "Playback", grid=Size(4, 4))
+    page.add(create_ui_icon("uc:backward", 0, 0, cmd="REWIND"))
+    page.add(create_ui_icon("uc:square-small", 1, 0, cmd="STOP"))
+    page.add(create_ui_icon("uc:play-pause", 2, 0, cmd="PLAYPAUSE"))
+    page.add(create_ui_icon("uc:forward", 3, 0, cmd="FASTFORWARD"))
+    page.add(create_ui_icon("uc:volume-xmark", 0, 1, cmd="MUTE"))
+    page.add(create_ui_icon("uc:volume-low", 1, 1, cmd="VOLUME_DOWN"))
+    page.add(create_ui_icon("uc:volume-high", 2, 1, cmd="VOLUME_UP"))
+    page.add(create_ui_icon("uc:circle-dot", 3, 1, cmd="RECORD"))
+    page.add(create_ui_icon("uc:circle-check", 0, 2, cmd="SELECT"))
+    page.add(create_ui_icon("uc:arrow-right-to-bracket", 3, 2, cmd="SOURCE"))
+    page.add(create_ui_icon("uc:circle-r", 0, 3, cmd="RED"))
+    page.add(create_ui_icon("uc:circle-g", 1, 3, cmd="GREEN"))
+    page.add(create_ui_icon("uc:circle-y", 2, 3, cmd="YELLOW"))
+    page.add(create_ui_icon("uc:circle-b", 3, 3, cmd="BLUE"))
     return page
 
 
-def _create_colors_page() -> UiPage:
-    page = UiPage("colors", "Color Buttons", grid=Size(4, 6))
-    page.add(create_ui_text("RED", 0, 1, size=Size(2, 2), cmd="RED"))
-    page.add(create_ui_text("GREEN", 2, 1, size=Size(2, 2), cmd="GREEN"))
-    page.add(create_ui_text("YELLOW", 0, 3, size=Size(2, 2), cmd="YELLOW"))
-    page.add(create_ui_text("BLUE", 2, 3, size=Size(2, 2), cmd="BLUE"))
-    page.add(create_ui_icon("uc:guide", 1, 5, size=Size(2, 1), cmd="GUIDE"))
+def _create_power_page() -> UiPage:
+    page = UiPage("power", "Power Buttons", grid=Size(4, 4))
+    page.add(create_ui_text("Power On", 0, 0, size=Size(2, 2), cmd="POWER_ON"))
+    page.add(create_ui_text("Power Off", 2, 0, size=Size(2, 2), cmd="POWER_OFF"))
     return page
 
 
@@ -151,7 +150,7 @@ class HorizonRemote(Remote):
                 _create_main_page(),
                 _create_numbers_page(),
                 _create_playback_page(),
-                _create_colors_page(),
+                _create_power_page(),
             ],
             cmd_handler=self._handle_command,
         )

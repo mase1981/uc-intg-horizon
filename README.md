@@ -71,18 +71,18 @@ This integration works with LG Horizon boxes from the following providers:
 
 #### **Complete Button Mapping**
 - **D-Pad Navigation** - Complete directional pad with Enter/OK
-- **Menu Controls** - Home, Guide, TV, Back, Context menu
+- **Menu Controls** - Home, Guide, DVR, TV, Back, Context menu
 - **Color Buttons** - Red, Green, Yellow, Blue function keys
-- **Transport Controls** - Play, Pause, Stop, Fast Forward, Rewind
+- **Transport Controls** - Play, Pause, Stop, Fast Forward, Rewind, Record
 - **Volume Control** - Volume up/down, mute (via HDMI-CEC)
 - **Channel Controls** - Channel up/down navigation
 - **Number Keypad** - Direct channel entry (0-9)
 
 #### **Custom UI Pages**
-- **Main Control** - Power, navigation, playback, menus
+- **Main Control** - Power toggle, navigation, playback, menus
 - **Channel Numbers** - 0-9 keypad with channel controls
-- **Playback** - Transport controls with volume
-- **Color Buttons** - Red, Green, Yellow, Blue keys
+- **Playback** - Transport controls with volume, also color buttons
+- **Power Buttons** - Discrete on and off power buttons
 
 ### **Provider Requirements**
 
