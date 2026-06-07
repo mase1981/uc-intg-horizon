@@ -142,7 +142,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             if entity:
                 self.api.configured_entities.add(entity)
                 if hasattr(entity, "push_update"):
-                    await entity.push_update()
+                    await entity.push_update(force=True)
 
     def _find_entity(self, entity_id: str) -> Any | None:
         for store in (self._media_players, self._remotes):
@@ -157,7 +157,23 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
 
         return None
 
-    async def _on_device_state_change(self, device_id: str, state: dict[str, Any]) -> None:
+    async def on_device_update(
+        self,
+        entity_id: str | None = None,
+        update: dict[str, Any] | None = None,
+        clear_media_when_off: bool = True,
+    ) -> None:
+        # Disable framework attribute routing: _on_device_state_change pushes
+        # full entity state with change filtering, so the framework's extra
+        # un-deduplicated STATE message per device callback is pure overhead
+        return
+
+    async def _on_device_state_change(
+        self, device_id: str | None = None, state: dict[str, Any] | None = None
+    ) -> None:
+        if not device_id:
+            return
+
         config_id = self._stb_to_config.get(device_id)
         if config_id:
             device = self._device_instances.get(config_id)

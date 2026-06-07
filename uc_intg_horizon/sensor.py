@@ -34,6 +34,7 @@ class _BaseSensor(Sensor):
         self._device_id = device_id
         self._horizon_device = horizon_device
         self._api = api
+        self._last_sent: tuple | None = None
 
         super().__init__(
             identifier=entity_id,
@@ -43,16 +44,26 @@ class _BaseSensor(Sensor):
             device_class=DeviceClasses.CUSTOM,
         )
 
-    def _push_if_configured(self) -> None:
-        if self._api and self._api.configured_entities.contains(self.id):
-            self._api.configured_entities.update_attributes(self.id, self.attributes)
+    def _push_if_configured(self, force: bool = False) -> None:
+        if not self._api or not self._api.configured_entities.contains(self.id):
+            return
 
-    async def update_state(self, device_state: dict[str, Any]) -> None:
+        current = (
+            self.attributes.get(Attributes.STATE),
+            self.attributes.get(Attributes.VALUE),
+        )
+        if not force and current == self._last_sent:
+            return
+
+        self._last_sent = current
+        self._api.configured_entities.update_attributes(self.id, self.attributes)
+
+    async def update_state(self, device_state: dict[str, Any], force: bool = False) -> None:
         raise NotImplementedError
 
-    async def push_update(self) -> None:
+    async def push_update(self, force: bool = False) -> None:
         state = self._horizon_device.get_device_state(self._device_id)
-        await self.update_state(state)
+        await self.update_state(state, force)
 
 
 class HorizonDeviceStateSensor(_BaseSensor):
@@ -67,7 +78,7 @@ class HorizonDeviceStateSensor(_BaseSensor):
             horizon_device, device_id, api,
         )
 
-    async def update_state(self, device_state: dict[str, Any]) -> None:
+    async def update_state(self, device_state: dict[str, Any], force: bool = False) -> None:
         horizon_state = device_state.get("state", "unavailable")
         if horizon_state in (
             "PLAYING", "PAUSED", "STANDBY", "ON", "OFF",
@@ -78,7 +89,7 @@ class HorizonDeviceStateSensor(_BaseSensor):
         else:
             self.attributes[Attributes.STATE] = States.UNAVAILABLE
             self.attributes[Attributes.VALUE] = "Unknown"
-        self._push_if_configured()
+        self._push_if_configured(force)
 
 
 class HorizonChannelSensor(_BaseSensor):
@@ -93,11 +104,11 @@ class HorizonChannelSensor(_BaseSensor):
             horizon_device, device_id, api,
         )
 
-    async def update_state(self, device_state: dict[str, Any]) -> None:
+    async def update_state(self, device_state: dict[str, Any], force: bool = False) -> None:
         channel = device_state.get("channel", "")
         self.attributes[Attributes.STATE] = States.ON
         self.attributes[Attributes.VALUE] = channel or "No Channel"
-        self._push_if_configured()
+        self._push_if_configured(force)
 
 
 class HorizonProgramSensor(_BaseSensor):
@@ -112,8 +123,8 @@ class HorizonProgramSensor(_BaseSensor):
             horizon_device, device_id, api,
         )
 
-    async def update_state(self, device_state: dict[str, Any]) -> None:
+    async def update_state(self, device_state: dict[str, Any], force: bool = False) -> None:
         title = device_state.get("media_title", "")
         self.attributes[Attributes.STATE] = States.ON
         self.attributes[Attributes.VALUE] = title or "No Program"
-        self._push_if_configured()
+        self._push_if_configured(force)

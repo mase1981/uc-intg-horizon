@@ -138,6 +138,7 @@ class HorizonRemote(Remote):
         self._api = api
         self._media_player = media_player
         self._channel_update_task: asyncio.Task | None = None
+        self._last_sent_state: States | None = None
 
         super().__init__(
             identifier=f"{device_id}_remote",
@@ -285,7 +286,7 @@ class HorizonRemote(Remote):
         except Exception as err:
             _LOG.error("Delayed channel update error: %s", err)
 
-    async def push_update(self) -> None:
+    async def push_update(self, force: bool = False) -> None:
         if not self._api or not self._api.configured_entities.contains(self.id):
             return
 
@@ -299,4 +300,9 @@ class HorizonRemote(Remote):
         else:
             self.attributes[Attributes.STATE] = States.UNAVAILABLE
 
+        new_state = self.attributes[Attributes.STATE]
+        if not force and new_state == self._last_sent_state:
+            return
+
+        self._last_sent_state = new_state
         self._api.configured_entities.update_attributes(self.id, self.attributes)

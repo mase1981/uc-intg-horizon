@@ -13,17 +13,32 @@ import time
 from typing import Any, TYPE_CHECKING
 
 from ucapi import MediaPlayer, StatusCodes
-from ucapi.media_player import Attributes, Commands, Features, States
-from ucapi.api_definitions import BrowseOptions, BrowseResults, SearchOptions, SearchResults
+from ucapi.media_player import (
+    Attributes,
+    BrowseOptions,
+    BrowseResults,
+    Commands,
+    Features,
+    SearchOptions,
+    SearchResults,
+    States,
+)
 
 from uc_intg_horizon import browser
-from uc_intg_horizon.const import CHANNEL_UPDATE_DELAY, POWER_COMMAND_DELAY, STREAMING_APPS
+from uc_intg_horizon.const import (
+    CHANNEL_UPDATE_DELAY,
+    POSITION_RESEND_THRESHOLD,
+    POWER_COMMAND_DELAY,
+    STREAMING_APPS,
+)
 
 if TYPE_CHECKING:
     import ucapi
     from uc_intg_horizon.device import HorizonDevice
 
 _LOG = logging.getLogger(__name__)
+
+_UNSET = object()
 
 FEATURES = [
     Features.ON_OFF,
@@ -74,6 +89,9 @@ class HorizonMediaPlayer(MediaPlayer):
         self._channel_update_task: asyncio.Task | None = None
         self._last_good_metadata: dict[str, Any] = {}
         self._pending_channel: str = ""
+        self._last_sent_attributes: dict[str, Any] = {}
+        self._image_base_url: str = ""
+        self._image_unique_url: str = ""
 
         attributes = {
             Attributes.STATE: States.UNAVAILABLE,
@@ -365,16 +383,20 @@ class HorizonMediaPlayer(MediaPlayer):
         }
         return device_state
 
-    @staticmethod
-    def _make_unique_image_url(base_url: str) -> str:
+    def _make_unique_image_url(self, base_url: str) -> str:
         if not base_url:
             return base_url
-        sep = "&" if "?" in base_url else "?"
-        return f"{base_url}{sep}_t={int(time.time() * 1000)}"
+        # Cache-buster forces the Remote to re-fetch artwork, but must stay
+        # stable while the image is unchanged or every update re-downloads it
+        if base_url != self._image_base_url:
+            sep = "&" if "?" in base_url else "?"
+            self._image_base_url = base_url
+            self._image_unique_url = f"{base_url}{sep}_t={int(time.time() * 1000)}"
+        return self._image_unique_url
 
     # -- Push update -----------------------------------------------------------
 
-    async def push_update(self) -> None:
+    async def push_update(self, force: bool = False) -> None:
         if not self._api or not self._api.configured_entities.contains(self.id):
             return
 
@@ -438,7 +460,7 @@ class HorizonMediaPlayer(MediaPlayer):
         if not self._sources_loaded and self._horizon_device.channels_loaded:
             await self._load_sources()
 
-        self._api.configured_entities.update_attributes(self.id, self.attributes)
+        self._send_changed_attributes(force)
 
         sensor_state = {
             "state": horizon_state,
@@ -447,3 +469,29 @@ class HorizonMediaPlayer(MediaPlayer):
         }
         for sensor in self._sensors:
             await sensor.update_state(sensor_state)
+
+    def _send_changed_attributes(self, force: bool = False) -> None:
+        if force:
+            changed = dict(self.attributes)
+        else:
+            changed = {
+                key: value
+                for key, value in self.attributes.items()
+                if self._last_sent_attributes.get(key, _UNSET) != value
+            }
+            if not changed:
+                return
+
+            # Position drifts on every device callback; only resend when it
+            # moved noticeably or something else changed (seek, pause, metadata)
+            if set(changed) == {Attributes.MEDIA_POSITION}:
+                last_pos = self._last_sent_attributes.get(Attributes.MEDIA_POSITION) or 0
+                new_pos = changed[Attributes.MEDIA_POSITION] or 0
+                if abs(new_pos - last_pos) < POSITION_RESEND_THRESHOLD:
+                    return
+
+        self._last_sent_attributes = {
+            key: list(value) if isinstance(value, list) else value
+            for key, value in self.attributes.items()
+        }
+        self._api.configured_entities.update_attributes(self.id, changed)
