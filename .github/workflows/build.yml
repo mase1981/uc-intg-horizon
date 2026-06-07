@@ -116,6 +116,8 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -133,6 +135,8 @@ jobs:
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
+        with:
+          pattern: uc-intg-*
 
       - name: Extract build archives from downloaded files
         run: |
