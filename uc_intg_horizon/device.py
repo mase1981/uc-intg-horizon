@@ -62,6 +62,7 @@ class HorizonDevice(ExternalClientDevice):
         self._lg_devices: dict[str, LGDevice] = {}
         self._token_needs_save: bool = False
         self._channels_loaded: bool = False
+        self._connect_lock: asyncio.Lock = asyncio.Lock()
 
         os.environ["SSL_CERT_FILE"] = certifi.where()
         os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -114,9 +115,25 @@ class HorizonDevice(ExternalClientDevice):
 
     # -- ExternalClientDevice interface ----------------------------------------
 
+    async def connect(self) -> bool:
+        # Serialize concurrent connect attempts. The framework can call connect()
+        # twice in quick succession (device-added + subscribe_events) while the
+        # first attempt is still in flight, which would orphan a connected MQTT
+        # client and leak its aiohttp session (uc-intg-vidaa v1.0.0 failure mode).
+        async with self._connect_lock:
+            return await super().connect()
+
+    async def disconnect(self) -> None:
+        async with self._connect_lock:
+            await super().disconnect()
+
     async def create_client(self) -> LGHorizonApi:
         if self._country_code not in COUNTRY_SETTINGS:
             raise ValueError(f"Unsupported country code: {self._country_code}")
+
+        if self._api or (self._session and not self._session.closed):
+            _LOG.debug("Tearing down previous client before creating a new one")
+            await self.disconnect_client()
 
         ssl_context = ssl.create_default_context(cafile=certifi.where())
         connector = aiohttp.TCPConnector(ssl=ssl_context)
