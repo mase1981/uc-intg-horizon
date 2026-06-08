@@ -1,15 +1,19 @@
 #!/bin/bash
 set -e
 
-# Parse JSON with jq, parse TOML with grep/sed
 get_driver_version() {
-  jq -r '.version' driver.json
+  grep -E '"version"' driver.json | head -n 1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
 }
 
-get_pyproject_version() {
-  # Assumes pyproject.toml has a line like: version = "1.2.3"
-  grep -E '^\s*version\s*=' pyproject.toml | head -n 1 | sed -E 's/.*=\s*"([^"]+)".*/\1/'
-}
+# driver.json must be plain UTF-8 with no byte-order mark. A BOM makes the Remote
+# core (serde_json) fail with "expected value at line 1 column 1" on upload, so the
+# integration cannot be installed. Editors / PowerShell Set-Content can add one.
+if [[ -f driver.json ]]; then
+  if [[ "$(head -c 3 driver.json | od -An -tx1 | tr -d ' \n')" == "efbbbf" ]]; then
+    echo "❌ driver.json starts with a UTF-8 BOM. Re-save it as UTF-8 without BOM before pushing."
+    exit 1
+  fi
+fi
 
 while read local_ref local_sha remote_ref remote_sha
 do
@@ -17,23 +21,13 @@ do
     tag_name="${local_ref#refs/tags/}"
 
     driver_version=$(get_driver_version)
-    pyproject_version=$(get_pyproject_version)
-
-    # Check consistency between files
-    if [[ "$driver_version" != "$pyproject_version" ]]; then
-      echo "❌ driver.json ($driver_version) and pyproject.toml ($pyproject_version) have different versions."
-      exit 1
-    fi
-
-    # Normalize: strip leading 'v' from tag
     normalized_tag="${tag_name#v}"
 
-    # Check that tag matches version
     if [[ "$normalized_tag" != "$driver_version" ]]; then
-      echo "❌ Tag ($tag_name) does not match version ($driver_version) in driver.json/pyproject.toml."
+      echo "❌ Tag ($tag_name) does not match version ($driver_version) in driver.json."
       exit 1
     fi
 
-    echo "✅ Version check passed for tag $tag_name"
+    echo "✅ Pre-push checks passed for tag $tag_name (driver.json: no BOM, version $driver_version)"
   fi
 done

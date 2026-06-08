@@ -1,6 +1,6 @@
-﻿{
+{
   "driver_id": "horizon",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "min_core_api": "0.22.0",
   "name": {
     "en": "LG Horizon Set-Top Box",
@@ -9,7 +9,7 @@
   },
   "description": {
     "en": "Control your LG Horizon set-top boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) with full media player, remote control, channel browser and seek support.",
-    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise) mit vollstÃ¤ndiger Media Player-, Fernbedienungs-, Kanal-Browser- und Seek-UnterstÃ¼tzung.",
+    "de": "Steuern Sie Ihre LG Horizon Set-Top-Boxen (Ziggo, Virgin Media, Telenet, UPC, Sunrise) mit vollständiger Media Player-, Fernbedienungs-, Kanal-Browser- und Seek-Unterstützung.",
     "nl": "Bedien uw LG Horizon settop boxes (Ziggo, Virgin Media, Telenet, UPC, Sunrise) met volledige mediaspeler-, afstandsbediening-, kanaalbrowser- en seek-ondersteuning."
   },
   "developer": {
@@ -38,7 +38,7 @@
           "label": {
             "value": {
               "en": "Select your provider and enter your credentials in the next screen to discover your set-top boxes.",
-              "de": "WÃ¤hlen Sie Ihren Anbieter und geben Sie Ihre Anmeldedaten im nÃ¤chsten Bildschirm ein, um Ihre Set-Top-Boxen zu finden.",
+              "de": "Wählen Sie Ihren Anbieter und geben Sie Ihre Anmeldedaten im nächsten Bildschirm ein, um Ihre Set-Top-Boxen zu finden.",
               "nl": "Selecteer uw provider en voer uw inloggegevens in op het volgende scherm om uw settop boxes te vinden."
             }
           }
