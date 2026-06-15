@@ -25,6 +25,13 @@ from lghorizon import (
     LGHorizonAuth,
     LGHorizonDevice as LGDevice,
     LGHorizonRunningState,
+    MEDIA_KEY_CHANNEL_DOWN,
+    MEDIA_KEY_CHANNEL_UP,
+    MEDIA_KEY_FAST_FORWARD,
+    MEDIA_KEY_PLAY_PAUSE,
+    MEDIA_KEY_RECORD,
+    MEDIA_KEY_REWIND,
+    MEDIA_KEY_STOP,
 )
 from lghorizon.helpers import make_id
 from ucapi_framework.device import ExternalClientDevice, DeviceEvents
@@ -357,93 +364,34 @@ class HorizonDevice(ExternalClientDevice):
             _LOG.error("Power toggle failed for %s: %s", device_id, err)
             return False
 
+    # Transport commands send the media key directly rather than via the
+    # pyheos/lghorizon helpers, which gate the key behind the locally-tracked
+    # ONLINE_RUNNING state. That state lags the box right after starting
+    # playback, so gated commands are silently dropped until it catches up -
+    # the cause of having to press forward/play several times.
     async def play(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.play()
-            return True
-        except Exception as err:
-            _LOG.error("Play failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_PLAY_PAUSE)
 
     async def pause(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.pause()
-            return True
-        except Exception as err:
-            _LOG.error("Pause failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_PLAY_PAUSE)
 
     async def stop(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.stop()
-            return True
-        except Exception as err:
-            _LOG.error("Stop failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_STOP)
 
     async def next_channel(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.next_channel()
-            return True
-        except Exception as err:
-            _LOG.error("Next channel failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_CHANNEL_UP)
 
     async def previous_channel(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.previous_channel()
-            return True
-        except Exception as err:
-            _LOG.error("Previous channel failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_CHANNEL_DOWN)
 
     async def fast_forward(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.fast_forward()
-            return True
-        except Exception as err:
-            _LOG.error("Fast forward failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_FAST_FORWARD)
 
     async def rewind(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.rewind()
-            return True
-        except Exception as err:
-            _LOG.error("Rewind failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_REWIND)
 
     async def record(self, device_id: str) -> bool:
-        device = await self.get_device(device_id)
-        if not device:
-            return False
-        try:
-            await device.record()
-            return True
-        except Exception as err:
-            _LOG.error("Record failed for %s: %s", device_id, err)
-            return False
+        return await self.send_key(device_id, MEDIA_KEY_RECORD)
 
     async def seek(self, device_id: str, position_seconds: int) -> bool:
         device = await self.get_device(device_id)
