@@ -48,6 +48,25 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
 
         self.api.add_listener(Events.SUBSCRIBE_ENTITIES, self._on_subscribe_entities)
 
+    async def on_r2_enter_standby(self) -> None:
+        """Keep Horizon connections alive while the Remote is in standby.
+
+        The default framework behavior disconnects all devices on standby. For
+        Horizon that means a full OAuth + MQTT reconnect on every wake, which
+        takes long enough that the first remote presses after waking are
+        silently queued until MQTT is back. Staying connected keeps commands
+        responsive immediately on wake; the MQTT client maintains itself in the
+        background.
+        """
+        _LOG.debug("Enter standby event: keeping device connection(s) alive")
+
+    async def on_r2_exit_standby(self) -> None:
+        """Reconnect only devices whose connection dropped while in standby."""
+        _LOG.debug("Exit standby event: verifying device connection(s)")
+        for device in self._device_instances.values():
+            if not device.check_client_connected():
+                self._loop.create_task(device.connect())
+
     def device_from_entity_id(self, entity_id: str) -> str | None:
         if not entity_id:
             return None

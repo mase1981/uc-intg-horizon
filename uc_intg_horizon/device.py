@@ -479,7 +479,7 @@ class HorizonDevice(ExternalClientDevice):
                 return False
             channel = match[0]
             payload = {
-                "id": await make_id(8),
+                "id": make_id(8),
                 "type": "CPE.pushToTV",
                 "source": {
                     "clientId": device._mqtt_client.client_id,
