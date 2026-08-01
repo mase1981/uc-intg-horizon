@@ -133,7 +133,7 @@ class HorizonSetupFlow(BaseSetupFlow[HorizonConfig]):
                 )
 
             service_config = await auth.get_service_config()
-            service_url = await service_config.get_service_url("personalizationService")
+            service_url = service_config.get_service_url("personalizationService")
             customer_data = await auth.request(
                 service_url,
                 f"/v1/customer/{auth.household_id}?with=profiles%2Cdevices",
