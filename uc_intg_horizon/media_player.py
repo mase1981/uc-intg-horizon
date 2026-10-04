@@ -155,22 +155,29 @@ class HorizonMediaPlayer(MediaPlayer):
     ) -> StatusCodes:
         _LOG.info("[%s] Command: %s params=%s", self.id, cmd_id, params)
 
+        if not self._horizon_device.is_ready(self._device_id):
+            _LOG.warning("[%s] Not connected, command %s rejected", self.id, cmd_id)
+            self._horizon_device.request_reconnect()
+            return StatusCodes.SERVICE_UNAVAILABLE
+
         is_power = False
         is_channel = False
+        ok = True
+        attributes_before = dict(self.attributes)
 
         try:
             if cmd_id == Commands.ON:
-                await self._horizon_device.power_on(self._device_id)
+                ok = await self._horizon_device.power_on(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
                 is_power = True
 
             elif cmd_id == Commands.OFF:
-                await self._horizon_device.power_off(self._device_id)
+                ok = await self._horizon_device.power_off(self._device_id)
                 self.attributes[Attributes.STATE] = States.STANDBY
                 is_power = True
 
             elif cmd_id == Commands.TOGGLE:
-                await self._horizon_device.power_toggle(self._device_id)
+                ok = await self._horizon_device.power_toggle(self._device_id)
                 current = self.attributes.get(Attributes.STATE)
                 if current in [States.ON, States.PLAYING, States.PAUSED]:
                     self.attributes[Attributes.STATE] = States.STANDBY
@@ -181,32 +188,32 @@ class HorizonMediaPlayer(MediaPlayer):
             elif cmd_id == Commands.PLAY_PAUSE:
                 state = self._horizon_device.get_device_state(self._device_id)
                 if state.get("paused"):
-                    await self._horizon_device.play(self._device_id)
+                    ok = await self._horizon_device.play(self._device_id)
                     self.attributes[Attributes.STATE] = States.PLAYING
                 else:
-                    await self._horizon_device.pause(self._device_id)
+                    ok = await self._horizon_device.pause(self._device_id)
                     self.attributes[Attributes.STATE] = States.PAUSED
 
             elif cmd_id == Commands.STOP:
-                await self._horizon_device.stop(self._device_id)
+                ok = await self._horizon_device.stop(self._device_id)
                 self.attributes[Attributes.STATE] = States.ON
 
             elif cmd_id == Commands.NEXT:
-                await self._horizon_device.next_channel(self._device_id)
+                ok = await self._horizon_device.next_channel(self._device_id)
                 is_channel = True
 
             elif cmd_id == Commands.PREVIOUS:
-                await self._horizon_device.previous_channel(self._device_id)
+                ok = await self._horizon_device.previous_channel(self._device_id)
                 is_channel = True
 
             elif cmd_id == Commands.FAST_FORWARD:
-                await self._horizon_device.fast_forward(self._device_id)
+                ok = await self._horizon_device.fast_forward(self._device_id)
 
             elif cmd_id == Commands.REWIND:
-                await self._horizon_device.rewind(self._device_id)
+                ok = await self._horizon_device.rewind(self._device_id)
 
             elif cmd_id == Commands.RECORD:
-                await self._horizon_device.record(self._device_id)
+                ok = await self._horizon_device.record(self._device_id)
 
             elif cmd_id == Commands.SEEK:
                 if params and "media_position" in params:
@@ -218,46 +225,46 @@ class HorizonMediaPlayer(MediaPlayer):
                 return StatusCodes.BAD_REQUEST
 
             elif cmd_id == Commands.VOLUME_UP:
-                await self._horizon_device.send_key(self._device_id, "VolumeUp")
+                ok = await self._horizon_device.send_key(self._device_id, "VolumeUp")
 
             elif cmd_id == Commands.VOLUME_DOWN:
-                await self._horizon_device.send_key(self._device_id, "VolumeDown")
+                ok = await self._horizon_device.send_key(self._device_id, "VolumeDown")
 
             elif cmd_id == Commands.MUTE_TOGGLE:
-                await self._horizon_device.send_key(self._device_id, "VolumeMute")
+                ok = await self._horizon_device.send_key(self._device_id, "VolumeMute")
                 self.attributes[Attributes.MUTED] = not self.attributes.get(
                     Attributes.MUTED, False
                 )
 
             elif cmd_id == Commands.CURSOR_UP:
-                await self._horizon_device.send_key(self._device_id, "ArrowUp")
+                ok = await self._horizon_device.send_key(self._device_id, "ArrowUp")
             elif cmd_id == Commands.CURSOR_DOWN:
-                await self._horizon_device.send_key(self._device_id, "ArrowDown")
+                ok = await self._horizon_device.send_key(self._device_id, "ArrowDown")
             elif cmd_id == Commands.CURSOR_LEFT:
-                await self._horizon_device.send_key(self._device_id, "ArrowLeft")
+                ok = await self._horizon_device.send_key(self._device_id, "ArrowLeft")
             elif cmd_id == Commands.CURSOR_RIGHT:
-                await self._horizon_device.send_key(self._device_id, "ArrowRight")
+                ok = await self._horizon_device.send_key(self._device_id, "ArrowRight")
             elif cmd_id == Commands.CURSOR_ENTER:
-                await self._horizon_device.send_key(self._device_id, "Enter")
+                ok = await self._horizon_device.send_key(self._device_id, "Enter")
 
             elif cmd_id == Commands.HOME:
-                await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
+                ok = await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
             elif cmd_id == Commands.MENU:
-                await self._horizon_device.send_key(self._device_id, "Info")
+                ok = await self._horizon_device.send_key(self._device_id, "Info")
             elif cmd_id == Commands.CONTEXT_MENU:
-                await self._horizon_device.send_key(self._device_id, "Options")
+                ok = await self._horizon_device.send_key(self._device_id, "Options")
             elif cmd_id == Commands.GUIDE:
-                await self._horizon_device.send_key(self._device_id, "Guide")
+                ok = await self._horizon_device.send_key(self._device_id, "Guide")
             elif cmd_id == Commands.INFO:
-                await self._horizon_device.send_key(self._device_id, "Info")
+                ok = await self._horizon_device.send_key(self._device_id, "Info")
             elif cmd_id == Commands.BACK:
-                await self._horizon_device.send_key(self._device_id, "Escape")
+                ok = await self._horizon_device.send_key(self._device_id, "Escape")
 
             elif cmd_id == Commands.CHANNEL_UP:
-                await self._horizon_device.next_channel(self._device_id)
+                ok = await self._horizon_device.next_channel(self._device_id)
                 is_channel = True
             elif cmd_id == Commands.CHANNEL_DOWN:
-                await self._horizon_device.previous_channel(self._device_id)
+                ok = await self._horizon_device.previous_channel(self._device_id)
                 is_channel = True
 
             elif cmd_id == Commands.SELECT_SOURCE:
@@ -267,16 +274,23 @@ class HorizonMediaPlayer(MediaPlayer):
                 return await self._handle_play_media(params)
 
             elif cmd_id == "my_recordings":
-                await self._horizon_device.send_key(self._device_id, "Recordings")
+                ok = await self._horizon_device.send_key(self._device_id, "Recordings")
 
             elif cmd_id.startswith("channel_select:"):
                 channel = cmd_id.split(":", 1)[1]
-                await self._horizon_device.set_channel_by_number(self._device_id, channel)
+                ok = await self._horizon_device.set_channel_by_number(self._device_id, channel)
                 is_channel = True
 
             else:
                 _LOG.warning("[%s] Unhandled command: %s", self.id, cmd_id)
                 return StatusCodes.NOT_IMPLEMENTED
+
+            if not ok:
+                # The box did not take the command: keep the state shown before it.
+                _LOG.warning("[%s] Command %s failed", self.id, cmd_id)
+                self.attributes.clear()
+                self.attributes.update(attributes_before)
+                return StatusCodes.SERVER_ERROR
 
             if is_power:
                 await asyncio.sleep(POWER_COMMAND_DELAY)
@@ -296,14 +310,19 @@ class HorizonMediaPlayer(MediaPlayer):
 
         source = params["source"]
         if source.startswith("HDMI") or source == "AV Input":
-            await self._horizon_device.send_key(self._device_id, "Settings")
+            ok = await self._horizon_device.send_key(self._device_id, "Settings")
         elif source in STREAMING_APPS:
-            await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
+            ok = await self._horizon_device.send_key(self._device_id, "MediaTopMenu")
         else:
+            ok = await self._horizon_device.set_channel(self._device_id, source)
+            if not ok:
+                _LOG.warning("[%s] Could not switch to %s", self.id, source)
+                return StatusCodes.SERVER_ERROR
             self._pending_channel = source
-            await self._horizon_device.set_channel(self._device_id, source)
             self._schedule_channel_update()
 
+        if not ok:
+            return StatusCodes.SERVER_ERROR
         self.attributes[Attributes.SOURCE] = source
         return StatusCodes.OK
 
@@ -316,8 +335,11 @@ class HorizonMediaPlayer(MediaPlayer):
 
         if media_id.startswith("channel_"):
             channel_name = media_id[8:]
+            ok = await self._horizon_device.set_channel(self._device_id, channel_name)
+            if not ok:
+                _LOG.warning("[%s] Could not switch to %s", self.id, channel_name)
+                return StatusCodes.SERVER_ERROR
             self._pending_channel = channel_name
-            await self._horizon_device.set_channel(self._device_id, channel_name)
             self._schedule_channel_update()
             return StatusCodes.OK
 
