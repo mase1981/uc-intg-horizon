@@ -33,6 +33,7 @@ from lghorizon import (
     MEDIA_KEY_REWIND,
     MEDIA_KEY_STOP,
 )
+from lghorizon.exceptions import LGHorizonApiUnauthorizedError
 from lghorizon.helpers import make_id
 from ucapi_framework.device import ExternalClientDevice, DeviceEvents
 
@@ -70,6 +71,8 @@ class HorizonDevice(ExternalClientDevice):
         self._token_needs_save: bool = False
         self._channels_loaded: bool = False
         self._connect_lock: asyncio.Lock = asyncio.Lock()
+        self._auth_failed: bool = False
+        self._background_tasks: set[asyncio.Task] = set()
 
         os.environ["SSL_CERT_FILE"] = certifi.where()
         os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -112,6 +115,11 @@ class HorizonDevice(ExternalClientDevice):
     def channels_loaded(self) -> bool:
         return self._channels_loaded
 
+    @property
+    def auth_failed(self) -> bool:
+        """True when the provider rejected the stored credentials/token."""
+        return self._auth_failed
+
     def mark_token_saved(self) -> None:
         self._token_needs_save = False
 
@@ -146,12 +154,7 @@ class HorizonDevice(ExternalClientDevice):
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         self._session = aiohttp.ClientSession(connector=connector)
 
-        token = self._device_config.password
-        _LOG.info(
-            "Using refresh token auth for %s (token: %s...)",
-            self._country_code.upper(),
-            token[:20] if token and len(token) > 20 else token,
-        )
+        _LOG.info("Using refresh token auth for %s", self._country_code.upper())
         self._auth = LGHorizonAuth(
             websession=self._session,
             country_code=self._country_code,
@@ -191,10 +194,26 @@ class HorizonDevice(ExternalClientDevice):
                     len(self._lg_devices),
                 )
 
-                asyncio.create_task(
+                self._auth_failed = False
+                task = asyncio.create_task(
                     self._load_channels_background(original_refresh_channels)
                 )
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
                 return
+
+            except LGHorizonApiUnauthorizedError as err:
+                # Retrying a rejected token/password never helps and only
+                # hammers the provider's auth service; stop and tell the user.
+                self._auth_failed = True
+                _LOG.error(
+                    "[%s] Provider rejected the stored credentials/refresh token (%s). "
+                    "Not retrying - run the integration setup > Update with a new "
+                    "password or refresh token.",
+                    self.log_id, err,
+                )
+                await self.disconnect_client()
+                raise
 
             except Exception as err:
                 last_err = err
@@ -236,15 +255,22 @@ class HorizonDevice(ExternalClientDevice):
     # -- Token management ------------------------------------------------------
 
     def _on_token_refreshed(self, new_token: str) -> None:
-        old_token = self._device_config.password
-        if new_token and new_token != old_token:
-            _LOG.info(
-                "Token refreshed by API (old: %s... new: %s...)",
-                old_token[:20] if old_token and len(old_token) > 20 else old_token,
-                new_token[:20] if len(new_token) > 20 else new_token,
-            )
+        if not new_token or new_token == self._device_config.password:
+            return
+        if self._api is None:
+            # Late callback from a client that was already torn down (e.g. the
+            # account was updated/removed); never overwrite the stored token.
+            return
+        _LOG.info("Refresh token rotated by provider, persisting it")
+        self._token_needs_save = True
+        try:
+            # Persist immediately: rotated refresh tokens may invalidate the
+            # previous one, so waiting for a state update risks losing it.
+            if self.update_config(password=new_token):
+                self._token_needs_save = False
+        except Exception as err:  # pylint: disable=broad-except
             self._device_config.password = new_token
-            self._token_needs_save = True
+            _LOG.warning("Failed to persist refreshed token: %s", err)
 
     # -- Background tasks ------------------------------------------------------
 
@@ -252,6 +278,12 @@ class HorizonDevice(ExternalClientDevice):
         try:
             _LOG.debug("Background channel loading started...")
             await refresh_channels_func()
+            # lghorizon built each box's channel map while channels were
+            # deferred (empty), so hand every box the real list now.
+            if self._api:
+                channels = await self._api.get_profile_channels()
+                for device in self._lg_devices.values():
+                    await device.update_channels(channels)
             self._channels_loaded = True
             _LOG.info("Background channel loading completed")
         except Exception as err:
@@ -272,6 +304,20 @@ class HorizonDevice(ExternalClientDevice):
         else:
             uc_state = "UNAVAILABLE"
         self.events.emit(DeviceEvents.UPDATE, device_id, {"state": uc_state})
+
+    # -- Command readiness -----------------------------------------------------
+
+    def is_ready(self, device_id: str) -> bool:
+        """True when the cloud session is up and the box is known."""
+        return self.check_client_connected() and device_id in self._lg_devices
+
+    def request_reconnect(self) -> None:
+        """Start a background connect if idle (used when a command arrives offline)."""
+        if self._auth_failed or self._connect_lock.locked():
+            return
+        task = asyncio.create_task(self.connect())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     # -- Device state ----------------------------------------------------------
 
@@ -421,6 +467,8 @@ class HorizonDevice(ExternalClientDevice):
             return False
         try:
             channels = device._channels
+            if not channels and self._api:
+                channels = await self._api.get_profile_channels()
             match = [ch for ch in channels.values() if ch.title == channel_name]
             if not match:
                 _LOG.error("Channel not found: %s", channel_name)

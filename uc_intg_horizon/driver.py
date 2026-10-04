@@ -45,6 +45,9 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         self._sensors: dict[str, list] = {}
         self._retry_task: asyncio.Task | None = None
         self._stb_to_config: dict[str, str] = {}
+        # Entity IDs that were configured on the Remote when their account
+        # config was removed by setup "Update"; re-attached on re-registration.
+        self._reattach_configured: set[str] = set()
 
         self.api.add_listener(Events.SUBSCRIBE_ENTITIES, self._on_subscribe_entities)
 
@@ -64,7 +67,7 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
         """Reconnect only devices whose connection dropped while in standby."""
         _LOG.debug("Exit standby event: verifying device connection(s)")
         for device in self._device_instances.values():
-            if not device.check_client_connected():
+            if not device.check_client_connected() and not device.auth_failed:
                 self._loop.create_task(device.connect())
 
     def device_from_entity_id(self, entity_id: str) -> str | None:
@@ -122,10 +125,51 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             for sensor in sensors:
                 self.api.available_entities.add(sensor)
 
+            # After setup "Update" the Remote still has these entities
+            # configured: bind them to the new device instance.
+            for entity in (mp, remote, *sensors):
+                if entity.id in self._reattach_configured:
+                    self._reattach_configured.discard(entity.id)
+                    self.api.configured_entities.remove(entity.id)
+                    self.api.configured_entities.add(entity)
+
             _LOG.info("Created entities for STB: %s (%s)", device_name, device_id)
+
+    def on_device_added(self, device_config: HorizonConfig | None) -> None:
+        """Register a newly added/updated account and connect it with retries.
+
+        The framework only registers the device (connect=False) and later issues
+        a single connect on entity subscription; a failure there would never be
+        retried. Connect here and fall back to the driver retry task.
+        """
+        super().on_device_added(device_config)
+        if device_config is not None:
+            self._loop.create_task(self._connect_added_device(device_config.identifier))
+
+    async def _connect_added_device(self, identifier: str) -> None:
+        device = self._device_instances.get(identifier)
+        if device is None or device.is_connected:
+            return
+        if await device.connect():
+            config = self.config_manager.get(identifier) if self.config_manager else None
+            if config:
+                self._save_token_if_changed(device, config)
+            await self.api.set_device_state(DeviceStates.CONNECTED)
+            return
+        await self.api.set_device_state(DeviceStates.ERROR)
+        if not device.auth_failed:
+            self._start_retry_task()
 
     def on_device_removed(self, device_or_config: HorizonDevice | HorizonConfig | None) -> None:
         if device_or_config is None:
+            # Framework: disconnect and drop every device instance and entity.
+            super().on_device_removed(None)
+            self._reattach_configured.clear()
+            for entity in (*self._media_players.values(), *self._remotes.values()):
+                self._retire_entity(entity)
+            for sensors in self._sensors.values():
+                for sensor in sensors:
+                    self._retire_entity(sensor)
             self._media_players.clear()
             self._remotes.clear()
             self._sensors.clear()
@@ -139,21 +183,41 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             else device_or_config.config
         )
 
+        # Remember which entities the Remote has configured so an "Update"
+        # (remove + add with the same STBs) can re-attach them.
+        for dev_cfg in config.devices:
+            for suffix in ("", *_ENTITY_SUFFIXES):
+                entity_id = f"{dev_cfg.device_id}{suffix}"
+                if self.api.configured_entities.contains(entity_id):
+                    self._reattach_configured.add(entity_id)
+
+        # Framework: pop the device instance, drop its listeners, disconnect it
+        # and remove its entities. Must run while _stb_to_config still maps them.
+        super().on_device_removed(config)
+
         for dev_cfg in config.devices:
             device_id = dev_cfg.device_id
             self._stb_to_config.pop(device_id, None)
 
-            for store, attr in [
-                (self._media_players, "id"),
-                (self._remotes, "id"),
-            ]:
+            for store in (self._media_players, self._remotes):
                 entity = store.pop(device_id, None)
                 if entity:
-                    self.api.available_entities.remove(getattr(entity, attr))
+                    self._retire_entity(entity)
+                    self.api.available_entities.remove(entity.id)
 
             if device_id in self._sensors:
                 for sensor in self._sensors.pop(device_id):
+                    self._retire_entity(sensor)
                     self.api.available_entities.remove(sensor.id)
+
+    @staticmethod
+    def _retire_entity(entity: Any) -> None:
+        """Silence a removed entity so its background loops can't push stale state
+        over a replacement entity with the same ID."""
+        stop = getattr(entity, "stop", None)
+        if callable(stop):
+            stop()
+        entity._api = None
 
     async def _on_subscribe_entities(self, entity_ids: list[str]) -> None:
         for entity_id in entity_ids:
@@ -220,12 +284,17 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             return True
 
         success = True
+        retryable = False
         for config in configs:
             device = self._device_instances.get(config.identifier)
             if device and not device.is_connected:
+                if device.auth_failed:
+                    success = False
+                    continue
                 if not await device.connect():
                     _LOG.error("Failed to connect: %s", config.identifier)
                     success = False
+                    retryable = retryable or not device.auth_failed
                 else:
                     self._save_token_if_changed(device, config)
 
@@ -233,7 +302,8 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
             await self.api.set_device_state(DeviceStates.CONNECTED)
         else:
             await self.api.set_device_state(DeviceStates.ERROR)
-            self._start_retry_task()
+            if retryable:
+                self._start_retry_task()
 
         return success
 
@@ -264,4 +334,13 @@ class HorizonDriver(BaseIntegrationDriver[HorizonDevice, HorizonConfig]):
                     return
             except Exception as err:
                 _LOG.error("Retry failed: %s", err)
+            if not any(
+                not dev.is_connected and not dev.auth_failed
+                for dev in self._device_instances.values()
+            ):
+                _LOG.error(
+                    "Stopping connection retries: credentials rejected. "
+                    "Run the integration setup > Update to enter a new password/token."
+                )
+                return
             attempt += 1

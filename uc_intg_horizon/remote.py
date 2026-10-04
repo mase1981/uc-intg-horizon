@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 
+_SPECIAL_COMMANDS = ("POWER_ON", "POWER_OFF", "POWER_TOGGLE", "PLAYPAUSE", "RECORD", "DVR")
+
 BUTTON_MAPPING = [
     create_btn_mapping(Buttons.HOME, short="HOME"),
     create_btn_mapping(Buttons.BACK, short="BACK"),
@@ -156,7 +158,15 @@ class HorizonRemote(Remote):
             cmd_handler=self._handle_command,
         )
 
-        asyncio.create_task(self._periodic_refresh())
+        self._refresh_task: asyncio.Task | None = asyncio.create_task(
+            self._periodic_refresh()
+        )
+
+    def stop(self) -> None:
+        """Cancel background tasks (entity removed / replaced)."""
+        for task in (self._refresh_task, self._channel_update_task):
+            if task and not task.done():
+                task.cancel()
 
     async def _periodic_refresh(self) -> None:
         from uc_intg_horizon.const import PERIODIC_REFRESH_INTERVAL
@@ -173,41 +183,76 @@ class HorizonRemote(Remote):
                 _LOG.error("Periodic refresh error for remote %s: %s", self._device_id, err)
                 await asyncio.sleep(PERIODIC_REFRESH_INTERVAL)
 
+    @staticmethod
+    def _is_known_command(command: str) -> bool:
+        return (
+            command.startswith("channel_select:")
+            or command in _SPECIAL_COMMANDS
+            or command in KEY_MAP
+        )
+
+    @staticmethod
+    def _int_param(params: dict[str, Any], key: str, default: int) -> int:
+        try:
+            return max(0, int(params.get(key, default) or default))
+        except (TypeError, ValueError):
+            return default
+
     async def _handle_command(
         self, entity: Any, cmd_id: str, params: dict[str, Any] | None
     ) -> StatusCodes:
         _LOG.info("[%s] Command: %s params=%s", self.id, cmd_id, params)
+        params = params or {}
 
-        is_power = False
-        is_channel = False
+        if cmd_id == Commands.SEND_CMD:
+            command = params.get("command")
+            if not command or not self._is_known_command(command):
+                _LOG.warning("[%s] Unknown command: %s", self.id, command)
+                return StatusCodes.BAD_REQUEST
+            commands = [command]
+        elif cmd_id == Commands.SEND_CMD_SEQUENCE:
+            sequence = params.get("sequence")
+            if isinstance(sequence, str):
+                sequence = sequence.split(",")
+            commands = [str(c).strip() for c in (sequence or []) if str(c).strip()]
+            unknown = [c for c in commands if not self._is_known_command(c)]
+            if not commands or unknown:
+                _LOG.warning("[%s] Invalid command sequence: %s", self.id, sequence)
+                return StatusCodes.BAD_REQUEST
+        elif cmd_id in (Commands.ON, Commands.OFF, Commands.TOGGLE):
+            commands = []
+        else:
+            return StatusCodes.NOT_IMPLEMENTED
+
+        if not self._horizon_device.is_ready(self._device_id):
+            _LOG.warning("[%s] Not connected, command %s rejected", self.id, cmd_id)
+            self._horizon_device.request_reconnect()
+            return StatusCodes.SERVICE_UNAVAILABLE
 
         try:
             if cmd_id == Commands.ON:
-                await self._horizon_device.power_on(self._device_id)
-                self.attributes[Attributes.STATE] = States.ON
-                is_power = True
-
+                ok = await self._horizon_device.power_on(self._device_id)
+                is_power, is_channel = True, False
             elif cmd_id == Commands.OFF:
-                await self._horizon_device.power_off(self._device_id)
-                self.attributes[Attributes.STATE] = States.OFF
-                is_power = True
-
+                ok = await self._horizon_device.power_off(self._device_id)
+                is_power, is_channel = True, False
             elif cmd_id == Commands.TOGGLE:
-                await self._horizon_device.power_toggle(self._device_id)
-                current = self.attributes.get(Attributes.STATE)
-                self.attributes[Attributes.STATE] = (
-                    States.OFF if current == States.ON else States.ON
-                )
-                is_power = True
-
-            elif cmd_id == Commands.SEND_CMD:
-                command = params.get("command") if params else None
-                if not command:
-                    return StatusCodes.BAD_REQUEST
-                is_power, is_channel = await self._dispatch_simple_command(command)
-
+                ok = await self._horizon_device.power_toggle(self._device_id)
+                is_power, is_channel = True, False
             else:
-                return StatusCodes.NOT_IMPLEMENTED
+                repeat = max(1, self._int_param(params, "repeat", 1))
+                delay = self._int_param(params, "delay", 0) / 1000
+                ok, is_power, is_channel = True, False, False
+                sends = [c for _ in range(repeat) for c in commands]
+                for index, command in enumerate(sends):
+                    if index and delay:
+                        await asyncio.sleep(delay)
+                    sent, power, channel = await self._dispatch_simple_command(command)
+                    is_power = is_power or power
+                    is_channel = is_channel or channel
+                    if not sent:
+                        ok = False
+                        break
 
             if is_power:
                 await asyncio.sleep(POWER_COMMAND_DELAY)
@@ -218,58 +263,52 @@ class HorizonRemote(Remote):
             else:
                 await self.push_update()
 
-            return StatusCodes.OK
+            return StatusCodes.OK if ok else StatusCodes.SERVER_ERROR
 
         except Exception as err:
             _LOG.error("[%s] Command error: %s", self.id, err, exc_info=True)
             return StatusCodes.SERVER_ERROR
 
-    async def _dispatch_simple_command(self, command: str) -> tuple[bool, bool]:
+    async def _dispatch_simple_command(self, command: str) -> tuple[bool, bool, bool]:
+        """Send one simple command. Returns (sent_ok, is_power, is_channel)."""
+        dev = self._horizon_device
         if command.startswith("channel_select:"):
             channel = command.split(":", 1)[1]
-            await self._horizon_device.set_channel_by_number(self._device_id, channel)
-            return (False, True)
+            return (await dev.set_channel_by_number(self._device_id, channel), False, True)
 
         if command == "POWER_ON":
-            await self._horizon_device.power_on(self._device_id)
-            return (True, False)
+            return (await dev.power_on(self._device_id), True, False)
         if command == "POWER_OFF":
-            await self._horizon_device.power_off(self._device_id)
-            return (True, False)
+            return (await dev.power_off(self._device_id), True, False)
         if command == "POWER_TOGGLE":
-            await self._horizon_device.power_toggle(self._device_id)
-            return (True, False)
+            return (await dev.power_toggle(self._device_id), True, False)
 
         if command == "PLAYPAUSE":
-            state = self._horizon_device.get_device_state(self._device_id)
+            state = dev.get_device_state(self._device_id)
             if state.get("paused"):
-                await self._horizon_device.play(self._device_id)
-            else:
-                await self._horizon_device.pause(self._device_id)
-            return (False, False)
+                return (await dev.play(self._device_id), False, False)
+            return (await dev.pause(self._device_id), False, False)
 
         if command == "RECORD":
-            await self._horizon_device.record(self._device_id)
-            return (False, False)
+            return (await dev.record(self._device_id), False, False)
 
         if command == "DVR":
-            await self._horizon_device.send_key(self._device_id, "DVR")
-            return (False, False)
+            return (await dev.send_key(self._device_id, "DVR"), False, False)
 
         horizon_key = KEY_MAP.get(command)
         if not horizon_key:
             _LOG.warning("Unknown command: %s", command)
-            return (False, False)
+            return (False, False, False)
 
-        await self._horizon_device.send_key(self._device_id, horizon_key)
+        sent = await dev.send_key(self._device_id, horizon_key)
 
         if command in ("CHANNEL_UP", "CHANNEL_DOWN"):
-            return (False, True)
+            return (sent, False, True)
 
         if command in ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"):
             self._schedule_channel_update()
 
-        return (False, False)
+        return (sent, False, False)
 
     def _schedule_channel_update(self) -> None:
         if self._channel_update_task and not self._channel_update_task.done():
